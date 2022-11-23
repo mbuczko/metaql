@@ -13,6 +13,7 @@ enum Token<'a> {
     Eq,
     Comma,
     Str(&'a str),
+    Ident(&'a str),
     Unknown,
 }
 
@@ -46,72 +47,81 @@ fn whitespace(ch: char) -> bool {
 }
 
 fn tokenize(input: &str) -> anyhow::Result<Vec<Token>, TokenizeError> {
-    let chars = input.chars().enumerate();
+    let mut chars = input.chars().enumerate().peekable();
     let mut output = Vec::new();
     let mut braces = Vec::new();
-    let mut sstart = 0;
 
-    for (pos, ch) in chars {
-        if ch == '"' {
-            if sstart > 0 {
-                output.push(Token::Str(&input[sstart + 1..pos]));
-                sstart = 0;
-            } else {
-                sstart = pos;
+    while let Some((pos, ch)) = chars.next() {
+        let token = match ch {
+            b if whitespace(b) => continue,
+            b if b.is_alphabetic() => {
+                let mut eoi = pos;
+                loop {
+                    if let Some((p, ch)) = chars.peek() {
+                        if ch.is_alphanumeric() || *ch == '-' {
+                            eoi = *p;
+                            chars.next();
+                            continue;
+                        }
+                    }
+                    break Token::Ident(&input[pos..eoi + 1]);
+                }
             }
-        } else if sstart == 0 && !whitespace(ch) {
-            let token = match ch {
-                '(' => {
-                    braces.push(Brace::Round);
-                    Token::RoundOpen
-                }
-                ')' => match braces.pop() {
-                    Some(Brace::Round) => Token::RoundClose,
-                    b => {
-                        return Err(TokenizeError::UnbalancedBraces(
-                            pos,
-                            b.unwrap_or(Brace::Round),
-                        ))
+            '"' => loop {
+                if let Some((p, ch)) = chars.next() {
+                    if ch == '"' {
+                        break Token::Str(&input[pos + 1..p]);
                     }
-                },
-                '{' => {
-                    braces.push(Brace::Curly);
-                    Token::CurlyOpen
+                } else {
+                    return Err(TokenizeError::InvalidString(pos));
                 }
-                '}' => match braces.pop() {
-                    Some(Brace::Curly) => Token::CurlyClose,
-                    b => {
-                        return Err(TokenizeError::UnbalancedBraces(
-                            pos,
-                            b.unwrap_or(Brace::Curly),
-                        ))
-                    }
-                },
-                '[' => {
-                    braces.push(Brace::Square);
-                    Token::SquareOpen
+            },
+            '(' => {
+                braces.push(Brace::Round);
+                Token::RoundOpen
+            }
+            ')' => match braces.pop() {
+                Some(Brace::Round) => Token::RoundClose,
+                b => {
+                    return Err(TokenizeError::UnbalancedBraces(
+                        pos,
+                        b.unwrap_or(Brace::Round),
+                    ))
                 }
-                ']' => match braces.pop() {
-                    Some(Brace::Square) => Token::SquareClose,
-                    b => {
-                        return Err(TokenizeError::UnbalancedBraces(
-                            pos,
-                            b.unwrap_or(Brace::Square),
-                        ))
-                    }
-                },
-                ':' => Token::Eq,
-                ',' => Token::Comma,
-                _ => Token::Unknown,
-            };
-            output.push(token);
-        }
+            },
+            '{' => {
+                braces.push(Brace::Curly);
+                Token::CurlyOpen
+            }
+            '}' => match braces.pop() {
+                Some(Brace::Curly) => Token::CurlyClose,
+                b => {
+                    return Err(TokenizeError::UnbalancedBraces(
+                        pos,
+                        b.unwrap_or(Brace::Curly),
+                    ))
+                }
+            },
+            '[' => {
+                braces.push(Brace::Square);
+                Token::SquareOpen
+            }
+            ']' => match braces.pop() {
+                Some(Brace::Square) => Token::SquareClose,
+                b => {
+                    return Err(TokenizeError::UnbalancedBraces(
+                        pos,
+                        b.unwrap_or(Brace::Square),
+                    ))
+                }
+            },
+            ':' => Token::Eq,
+            ',' => Token::Comma,
+            _ => Token::Unknown,
+        };
+        output.push(token);
     }
-    if sstart == 0 {
-        Ok(output)
-    } else {
-        Err(TokenizeError::InvalidString(sstart))
-    }
+    Ok(output)
 }
 
 #[cfg(test)]
@@ -154,15 +164,24 @@ mod tests {
         assert_eq!(TokenizeError::UnbalancedBraces(0, Brace::Round), _result);
 
         let _result = tokenize("[)]").unwrap_err();
-        assert_eq!(
-            TokenizeError::UnbalancedBraces(1, Brace::Square),
-            _result
-        );
+        assert_eq!(TokenizeError::UnbalancedBraces(1, Brace::Square), _result);
 
         let _result = tokenize("([{{]}}])").unwrap_err();
+        assert_eq!(TokenizeError::UnbalancedBraces(4, Brace::Curly), _result);
+    }
+
+    #[test]
+    fn ident() {
+        let result = tokenize("{mime-type:\"image/png\"}").unwrap();
         assert_eq!(
-            TokenizeError::UnbalancedBraces(4, Brace::Curly),
-            _result
+            result,
+            vec![
+                Token::CurlyOpen,
+                Token::Ident("mime-type"),
+                Token::Eq,
+                Token::Str("image/png"),
+                Token::CurlyClose
+            ]
         );
     }
 }
