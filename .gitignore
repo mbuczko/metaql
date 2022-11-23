@@ -1,0 +1,8 @@
+.envrc
+package
+package-lock.json
+target
+build
+public
+Cargo.lock
+TAGS
