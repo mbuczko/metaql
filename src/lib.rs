@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use thiserror::Error;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 enum Token<'a> {
     RoundOpen,
     RoundClose,
@@ -14,6 +14,8 @@ enum Token<'a> {
     Comma,
     Str(&'a str),
     Ident(&'a str),
+    Float(f64),
+    Integer(i64),
     Unknown,
 }
 
@@ -40,6 +42,8 @@ pub enum TokenizeError {
     InvalidString(usize),
     #[error("unbalanced braces")]
     UnbalancedBraces(usize, Brace),
+    #[error("malformed float number")]
+    MalformedFloat(usize),
 }
 
 fn whitespace(ch: char) -> bool {
@@ -65,6 +69,36 @@ fn tokenize(input: &str) -> anyhow::Result<Vec<Token>, TokenizeError> {
                         }
                     }
                     break Token::Ident(&input[pos..eoi + 1]);
+                }
+            }
+            b if b.is_numeric() => {
+                let mut eoi = pos;
+                let mut point = false;
+                loop {
+                    if let Some((p, ch)) = chars.peek() {
+                        if ch.is_numeric() {
+                            eoi = *p;
+                            chars.next();
+                            continue;
+                        }
+                        // is it a float number, maybe?
+                        if *ch == '.' {
+                            if !point {
+                                chars.next();
+                                point = true;
+                                continue;
+                            }
+                        }
+                    }
+                    break if point {
+                        Token::Float(
+                            input[pos..eoi + 1]
+                                .parse()
+                                .map_err(|_| TokenizeError::MalformedFloat(eoi))?
+                        )
+                    } else {
+                        Token::Integer(input[pos..eoi + 1].parse().unwrap())
+                    };
                 }
             }
             '"' => loop {
@@ -160,16 +194,15 @@ mod tests {
     }
     #[test]
     fn unbalanced_braces() {
-        let _result = tokenize(")").unwrap_err();
-        assert_eq!(TokenizeError::UnbalancedBraces(0, Brace::Round), _result);
+        let result = tokenize(")").unwrap_err();
+        assert_eq!(TokenizeError::UnbalancedBraces(0, Brace::Round), result);
 
-        let _result = tokenize("[)]").unwrap_err();
-        assert_eq!(TokenizeError::UnbalancedBraces(1, Brace::Square), _result);
+        let result = tokenize("[)]").unwrap_err();
+        assert_eq!(TokenizeError::UnbalancedBraces(1, Brace::Square), result);
 
-        let _result = tokenize("([{{]}}])").unwrap_err();
-        assert_eq!(TokenizeError::UnbalancedBraces(4, Brace::Curly), _result);
+        let result = tokenize("([{{]}}])").unwrap_err();
+        assert_eq!(TokenizeError::UnbalancedBraces(4, Brace::Curly), result);
     }
-
     #[test]
     fn ident() {
         let result = tokenize("{mime-type:\"image/png\"}").unwrap();
@@ -183,5 +216,58 @@ mod tests {
                 Token::CurlyClose
             ]
         );
+    }
+    #[test]
+    fn integer() {
+        let result = tokenize("{focal-length: 32}").unwrap();
+        assert_eq!(
+            result,
+            vec![
+                Token::CurlyOpen,
+                Token::Ident("focal-length"),
+                Token::Eq,
+                Token::Integer(32),
+                Token::CurlyClose
+            ]
+        );
+    }
+    #[test]
+    fn float() {
+        let result = tokenize("{width: 32.122}").unwrap();
+        assert_eq!(
+            result,
+            vec![
+                Token::CurlyOpen,
+                Token::Ident("width"),
+                Token::Eq,
+                Token::Float(32.122),
+                Token::CurlyClose
+            ]
+        );
+        let result = tokenize("{width: 32.122.3}").unwrap();
+        assert_eq!(
+            result,
+            vec![
+                Token::CurlyOpen,
+                Token::Ident("width"),
+                Token::Eq,
+                Token::Float(32.122),
+                Token::Unknown,
+                Token::Integer(3),
+                Token::CurlyClose
+            ]
+        );
+        let result = tokenize("{width: 32.}").unwrap();
+        assert_eq!(
+            result,
+            vec![
+                Token::CurlyOpen,
+                Token::Ident("width"),
+                Token::Eq,
+                Token::Float(32.0),
+                Token::CurlyClose
+            ]
+        );
+
     }
 }
