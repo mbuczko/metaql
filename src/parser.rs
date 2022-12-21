@@ -65,6 +65,8 @@ pub enum ParseError {
     MalformedFilterValue(u8, String),
     #[error("filter operator expected")]
     MalformedFilterOperator(u8, String),
+    #[error("filter separator (comma) expected")]
+    UnknownFilterSeparator(u8),
     #[error("unknown value type")]
     UnknownFilterValueType,
     #[error("unknown filter operator")]
@@ -126,10 +128,13 @@ fn match_token<'a>(
 
 pub fn parse_expression<'a>(tokens: &'a [Token]) -> Result<Expr<'a>, ParseError> {
     if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Token::CurlyOpen)) {
-        let (filters, _) = parse_filters(tokens)?;
-        let range = Some(Range {});
+        let (filters, tokens) = parse_filters(tokens)?;
 
-        return Ok(Expr { filters, range });
+        // curly closing brace = end of filters
+        if let Some((_, _tokens)) = match_token(tokens, Matcher::Exact(Token::CurlyClose)) {
+            let range = Some(Range {});
+            return Ok(Expr { filters, range });
+        }
     }
     Err(ParseError::MalformedExpression)
 }
@@ -149,7 +154,8 @@ fn parse_filters<'a>(
 
         if let Some((op, tokens)) = match_token(tokens, Matcher::Operator) {
             // look for a value and compose a `Filter` if all elements have been matched correctly
-            if let Some((val, _)) = match_token(tokens, Matcher::Value) {
+            if let Some((val, tokens)) = match_token(tokens, Matcher::Value) {
+                tokens_slice = tokens;
                 filters.push(Filter {
                     path: id.to_owned().split('.').collect::<Vec<_>>(),
                     value: Value::try_from(val)?,
@@ -165,8 +171,13 @@ fn parse_filters<'a>(
                 id.to_string(),
             ));
         }
-        tokens_slice = tokens;
-        filter_idx += 1;
+
+        if let Some((_, tokens)) = match_token(tokens_slice, Matcher::Exact(Token::Comma)) {
+            tokens_slice = tokens;
+            filter_idx += 1;
+        } else {
+            break;
+        }
     }
     Ok((filters, tokens_slice))
 }
@@ -228,6 +239,34 @@ mod tests {
         assert_eq!(filter.value, Value::String("favourite".to_string()));
         assert!(filter.negated);
     }
+
+    #[test]
+    fn multiple_filters() {
+        let tokens = tokenize("{ meta.tag != \"favourite\", meta.focal.length=3 }").unwrap();
+        let mut expr = parse_expression(tokens.as_slice()).unwrap();
+
+        assert_eq!(expr.filters.len(), 2);
+
+        let second = expr.filters.pop().unwrap();
+        assert_eq!(second.path, vec!["meta", "focal", "length"]);
+        assert_eq!(second.value, Value::Integer(3));
+        assert_eq!(second.op, Operator::Equal);
+        assert!(!second.negated);
+
+        let first = expr.filters.pop().unwrap();
+        assert_eq!(first.path, vec!["meta", "tag"]);
+        assert_eq!(first.value, Value::String("favourite".to_string()));
+        assert_eq!(first.op, Operator::Equal);
+        assert!(first.negated);
+    }
+
+    #[test]
+    fn multiple_filters_invalid_separator() {
+        let tokens = tokenize("{ meta.tag != \"favourite\"; meta.focal_length=3.2 }").unwrap();
+        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+        assert_eq!(expr, ParseError::MalformedExpression);
+    }
+
 
     #[test]
     fn invalid_operator() {
