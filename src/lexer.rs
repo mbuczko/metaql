@@ -196,7 +196,7 @@ mod tests {
                 Token(Terminal::CurlyOpen, 0, 0),
                 Token(Terminal::RoundOpen, 3, 3),
                 Token(Terminal::RoundClose, 4, 4),
-                Token(Terminal::CurlyClose, 6, 6)
+                Token(Terminal::CurlyClose, 7, 7)
             ]
         );
     }
