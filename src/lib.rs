@@ -18,6 +18,7 @@ enum Token<'a> {
     Path(&'a str),
     Float(f32),
     Integer(i32),
+    Bool(bool),
     Unknown,
 }
 
@@ -82,7 +83,13 @@ fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                             continue;
                         }
                     }
-                    break Token::Path(&input[pos..eoi + 1]);
+                    let string = &input[pos..eoi + 1];
+                    let boolean = string == "true" || string == "false";
+                    break if boolean {
+                        Token::Bool(string.parse().unwrap())
+                    } else {
+                        Token::Path(string)
+                    };
                 }
             }
             b if b.is_numeric() => {
@@ -230,7 +237,8 @@ impl<'a> TryFrom<&Token<'a>> for Value {
             Token::String(s) => Ok(Self::String(s.to_string())),
             Token::Integer(i) => Ok(Self::Integer(*i)),
             Token::Float(f) => Ok(Self::Float(*f)),
-            _ => Err(ParseError::MalformedFilterValue)
+            Token::Bool(f) => Ok(Self::Bool(*f)),
+            _ => Err(ParseError::MalformedFilterValue),
         }
     }
 }
@@ -242,7 +250,7 @@ impl<'a> TryFrom<&Token<'a>> for Operator {
         match value {
             Token::Equal => Ok(Self::Equal),
             Token::Contains => Ok(Self::Contains),
-            _ => Err(ParseError::MalformedFilterOperator)
+            _ => Err(ParseError::MalformedFilterOperator),
         }
     }
 }
@@ -254,9 +262,13 @@ fn match_token<'a>(
     if let Some(token) = tokens.first() {
         let result = match (matcher, token) {
             (Matcher::Exact(t), token) if t == *token => Some(token),
-            (Matcher::Value, Token::String(_) | Token::Integer(_) | Token::Float(_)) => Some(token),
+            (
+                Matcher::Value,
+                Token::String(_) | Token::Integer(_) | Token::Float(_) | Token::Bool(_),
+            ) => Some(token),
             (Matcher::Path, Token::Path(_)) => Some(token),
             (Matcher::Float, Token::Float(_)) => Some(token),
+            (Matcher::Bool, Token::Bool(_)) => Some(token),
             (Matcher::Integer, Token::Integer(_)) => Some(token),
             (Matcher::Numeric, Token::Integer(_) | Token::Float(_)) => Some(token),
             (Matcher::Operator, Token::Equal | Token::Contains) => Some(token),
@@ -296,7 +308,7 @@ fn parse_filters<'a>(
                     path: id.to_owned().split('.').collect::<Vec<_>>(),
                     value: Value::try_from(val)?,
                     op: Operator::try_from(op)?,
-                    negated
+                    negated,
                 });
             }
         }
