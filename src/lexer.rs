@@ -2,7 +2,7 @@ use std::fmt::Display;
 use thiserror::Error;
 
 #[derive(Debug, PartialEq)]
-pub enum Token<'a> {
+pub enum Terminal<'a> {
     RoundOpen,
     RoundClose,
     CurlyOpen,
@@ -39,6 +39,9 @@ impl Display for Brace {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub struct Token<'a>(pub Terminal<'a>, pub usize, pub usize);
+
 #[derive(Error, Debug, PartialEq)]
 pub enum TokenizeError {
     #[error("non-terminated string")]
@@ -74,9 +77,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                     let string = &input[pos..eoi + 1];
                     let boolean = string == "true" || string == "false";
                     break if boolean {
-                        Token::Bool(string.parse().unwrap())
+                        Token(Terminal::Bool(string.parse().unwrap()), pos, eoi)
                     } else {
-                        Token::Path(string)
+                        Token(Terminal::Path(string), pos, eoi)
                     };
                 }
             }
@@ -100,20 +103,26 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                         }
                     }
                     break if point {
-                        Token::Float(
-                            input[pos..eoi + 1]
-                                .parse()
-                                .map_err(|_| TokenizeError::MalformedFloat(eoi))?,
+                        Token(
+                            Terminal::Float(
+                                input[pos..eoi + 1]
+                                    .parse()
+                                    .map_err(|_| TokenizeError::MalformedFloat(eoi))?
+                            ),
+                            pos, eoi
                         )
                     } else {
-                        Token::Integer(input[pos..eoi + 1].parse().unwrap())
+                        Token(
+                            Terminal::Integer(input[pos..eoi + 1].parse().unwrap()),
+                            pos, eoi
+                        )
                     };
                 }
             }
             '"' => loop {
                 if let Some((p, ch)) = chars.next() {
                     if ch == '"' {
-                        break Token::String(&input[pos + 1..p]);
+                        break Token(Terminal::String(&input[pos + 1..p]), pos, p)
                     }
                 } else {
                     return Err(TokenizeError::InvalidString(pos));
@@ -121,10 +130,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             },
             '(' => {
                 braces.push(Brace::Round);
-                Token::RoundOpen
+                Token(Terminal::RoundOpen, pos, pos)
             }
             ')' => match braces.pop() {
-                Some(Brace::Round) => Token::RoundClose,
+                Some(Brace::Round) => Token(Terminal::RoundClose, pos, pos),
                 b => {
                     return Err(TokenizeError::UnbalancedBraces(
                         pos,
@@ -134,10 +143,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             },
             '{' => {
                 braces.push(Brace::Curly);
-                Token::CurlyOpen
+                Token(Terminal::CurlyOpen, pos, pos)
             }
             '}' => match braces.pop() {
-                Some(Brace::Curly) => Token::CurlyClose,
+                Some(Brace::Curly) => Token(Terminal::CurlyClose, pos, pos),
                 b => {
                     return Err(TokenizeError::UnbalancedBraces(
                         pos,
@@ -147,10 +156,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             },
             '[' => {
                 braces.push(Brace::Square);
-                Token::SquareOpen
+                Token(Terminal::SquareOpen, pos, pos)
             }
             ']' => match braces.pop() {
-                Some(Brace::Square) => Token::SquareClose,
+                Some(Brace::Square) => Token(Terminal::SquareClose, pos, pos),
                 b => {
                     return Err(TokenizeError::UnbalancedBraces(
                         pos,
@@ -158,18 +167,17 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                     ))
                 }
             },
-            '!' => Token::Exclamation,
-            ':' => Token::Colon,
-            ',' => Token::Comma,
-            '=' => Token::Equal,
-            '~' => Token::Contains,
-            _ => Token::Unknown,
+            '!' => Token(Terminal::Exclamation, pos, pos),
+            ':' => Token(Terminal::Colon, pos, pos),
+            ',' => Token(Terminal::Comma, pos, pos),
+            '=' => Token(Terminal::Equal, pos, pos),
+            '~' => Token(Terminal::Contains, pos, pos),
+            _ => Token(Terminal::Unknown, pos, pos),
         };
         output.push(token);
     }
     Ok(output)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -181,30 +189,33 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                Token::CurlyOpen,
-                Token::CurlyOpen,
-                Token::CurlyClose,
-                Token::CurlyClose
+                Token(Terminal::CurlyOpen, 0, 0),
+                Token(Terminal::CurlyOpen, 2, 2),
+                Token(Terminal::CurlyClose, 4, 4),
+                Token(Terminal::CurlyClose, 6, 6)
             ]
         );
     }
+
     #[test]
     fn valid_string() {
         let result = tokenize("{ \"lorem ipsum\" }").unwrap();
         assert_eq!(
             result,
             vec![
-                Token::CurlyOpen,
-                Token::String("lorem ipsum"),
-                Token::CurlyClose
+                Token(Terminal::CurlyOpen, 0, 0),
+                Token(Terminal::String("lorem ipsum"), 2, 14),
+                Token(Terminal::CurlyClose, 16, 16)
             ]
         );
     }
+
     #[test]
     fn invalid_string() {
         let _result = tokenize("{\"lorem ipsum }").unwrap_err();
         assert_eq!(TokenizeError::InvalidString(1), _result);
     }
+
     #[test]
     fn unbalanced_braces() {
         let result = tokenize(")").unwrap_err();
@@ -216,17 +227,18 @@ mod tests {
         let result = tokenize("([{{]}}])").unwrap_err();
         assert_eq!(TokenizeError::UnbalancedBraces(4, Brace::Curly), result);
     }
+
     #[test]
     fn path() {
         let result = tokenize("{mime-type:\"image/png\"}").unwrap();
         assert_eq!(
             result,
             vec![
-                Token::CurlyOpen,
-                Token::Path("mime-type"),
-                Token::Colon,
-                Token::String("image/png"),
-                Token::CurlyClose
+                Token(Terminal::CurlyOpen, 0, 0),
+                Token(Terminal::Path("mime-type"), 1, 9),
+                Token(Terminal::Colon, 10, 10),
+                Token(Terminal::String("image/png"), 11, 21),
+                Token(Terminal::CurlyClose, 22, 22)
             ]
         );
     }
@@ -236,11 +248,11 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                Token::CurlyOpen,
-                Token::Path("focal-length"),
-                Token::Colon,
-                Token::Integer(32),
-                Token::CurlyClose
+                Token(Terminal::CurlyOpen, 0, 0),
+                Token(Terminal::Path("focal-length"), 1, 12),
+                Token(Terminal::Colon, 13, 13),
+                Token(Terminal::Integer(32), 15, 16),
+                Token(Terminal::CurlyClose, 17, 17)
             ]
         );
     }
@@ -250,36 +262,36 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                Token::CurlyOpen,
-                Token::Path("width"),
-                Token::Colon,
-                Token::Float(32.122),
-                Token::CurlyClose
+                Token(Terminal::CurlyOpen, 0, 0),
+                Token(Terminal::Path("width"), 1, 5),
+                Token(Terminal::Colon, 6, 6),
+                Token(Terminal::Float(32.122), 8, 13),
+                Token(Terminal::CurlyClose, 14, 14)
             ]
         );
         let result = tokenize("{width: 32.122.3}").unwrap();
         assert_eq!(
             result,
             vec![
-                Token::CurlyOpen,
-                Token::Path("width"),
-                Token::Colon,
-                Token::Float(32.122),
-                Token::Unknown,
-                Token::Integer(3),
-                Token::CurlyClose
+                Token(Terminal::CurlyOpen, 0, 0),
+                Token(Terminal::Path("width"), 1, 5),
+                Token(Terminal::Colon, 6, 6),
+                Token(Terminal::Float(32.122), 8, 13),
+                Token(Terminal::Unknown, 14, 14),
+                Token(Terminal::Integer(3), 15, 15),
+                Token(Terminal::CurlyClose, 16, 16)
             ]
         );
         let result = tokenize("{width: 32..}").unwrap();
         assert_eq!(
             result,
             vec![
-                Token::CurlyOpen,
-                Token::Path("width"),
-                Token::Colon,
-                Token::Float(32.0),
-                Token::Unknown,
-                Token::CurlyClose
+                Token(Terminal::CurlyOpen, 0, 0),
+                Token(Terminal::Path("width"), 1, 5),
+                Token(Terminal::Colon, 6, 6),
+                Token(Terminal::Float(32.0), 8, 9),
+                Token(Terminal::Unknown, 11, 11),
+                Token(Terminal::CurlyClose, 12, 12)
             ]
         );
     }

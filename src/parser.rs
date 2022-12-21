@@ -1,11 +1,11 @@
 use thiserror::Error;
 
-use crate::lexer::{tokenize, Token};
+use crate::lexer::{tokenize, Terminal, Token};
 
 /// Parser rules:
 ///
 /// expr     ->  query range?
-/// query    ->  "{" filter (COMMA filter)* "}"
+/// query    ->  CURLY_OPEN filter (COMMA filter)* CURLY_CLOSE
 /// filter   ->  PATH op value
 /// op       ->  "!"? (EQ | CONTAINS)
 /// value    ->  STRING | BOOL | numeric
@@ -26,7 +26,7 @@ enum Value {
 }
 
 pub enum Matcher<'a> {
-    Exact(Token<'a>),
+    Exact(Terminal<'a>),
     Path,
     Operator,
     Negation,
@@ -77,11 +77,11 @@ impl<'a> TryFrom<&Token<'a>> for Value {
     type Error = ParseError;
 
     fn try_from(value: &Token) -> Result<Self, Self::Error> {
-        match value {
-            Token::String(s) => Ok(Self::String(s.to_string())),
-            Token::Integer(i) => Ok(Self::Integer(*i)),
-            Token::Float(f) => Ok(Self::Float(*f)),
-            Token::Bool(f) => Ok(Self::Bool(*f)),
+        match value.0 {
+            Terminal::String(s) => Ok(Self::String(s.to_string())),
+            Terminal::Integer(i) => Ok(Self::Integer(i)),
+            Terminal::Float(f) => Ok(Self::Float(f)),
+            Terminal::Bool(b) => Ok(Self::Bool(b)),
             _ => Err(ParseError::UnknownFilterValueType),
         }
     }
@@ -91,9 +91,9 @@ impl<'a> TryFrom<&Token<'a>> for Operator {
     type Error = ParseError;
 
     fn try_from(value: &Token) -> Result<Self, Self::Error> {
-        match value {
-            Token::Equal => Ok(Self::Equal),
-            Token::Contains => Ok(Self::Contains),
+        match value.0 {
+            Terminal::Equal => Ok(Self::Equal),
+            Terminal::Contains => Ok(Self::Contains),
             _ => Err(ParseError::UnknownFilterOperator),
         }
     }
@@ -104,19 +104,20 @@ fn match_token<'a>(
     matcher: Matcher,
 ) -> Option<(&'a Token<'a>, &'a [Token<'a>])> {
     if let Some(token) = tokens.first() {
-        let result = match (matcher, token) {
-            (Matcher::Exact(t), token) if t == *token => Some(token),
+        let Token(terminal, _, _) = token;
+        let result = match (matcher, terminal) {
+            (Matcher::Exact(t), terminal) if t == *terminal => Some(token),
             (
                 Matcher::Value,
-                Token::String(_) | Token::Integer(_) | Token::Float(_) | Token::Bool(_),
+                Terminal::String(_) | Terminal::Integer(_) | Terminal::Float(_) | Terminal::Bool(_),
             ) => Some(token),
-            (Matcher::Path, Token::Path(_)) => Some(token),
-            (Matcher::Float, Token::Float(_)) => Some(token),
-            (Matcher::Bool, Token::Bool(_)) => Some(token),
-            (Matcher::Integer, Token::Integer(_)) => Some(token),
-            (Matcher::Numeric, Token::Integer(_) | Token::Float(_)) => Some(token),
-            (Matcher::Operator, Token::Equal | Token::Contains) => Some(token),
-            (Matcher::Negation, Token::Exclamation) => Some(token),
+            (Matcher::Path, Terminal::Path(_)) => Some(token),
+            (Matcher::Float, Terminal::Float(_)) => Some(token),
+            (Matcher::Bool, Terminal::Bool(_)) => Some(token),
+            (Matcher::Integer, Terminal::Integer(_)) => Some(token),
+            (Matcher::Numeric, Terminal::Integer(_) | Terminal::Float(_)) => Some(token),
+            (Matcher::Operator, Terminal::Equal | Terminal::Contains) => Some(token),
+            (Matcher::Negation, Terminal::Exclamation) => Some(token),
             _ => None,
         };
         if let Some(matched) = result {
@@ -127,11 +128,11 @@ fn match_token<'a>(
 }
 
 pub fn parse_expression<'a>(tokens: &'a [Token]) -> Result<Expr<'a>, ParseError> {
-    if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Token::CurlyOpen)) {
+    if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Terminal::CurlyOpen)) {
         let (filters, tokens) = parse_filters(tokens)?;
 
         // curly closing brace = end of filters
-        if let Some((_, _tokens)) = match_token(tokens, Matcher::Exact(Token::CurlyClose)) {
+        if let Some((_, _tokens)) = match_token(tokens, Matcher::Exact(Terminal::CurlyClose)) {
             let range = Some(Range {});
             return Ok(Expr { filters, range });
         }
@@ -147,7 +148,9 @@ fn parse_filters<'a>(
     let mut filter_idx = 0;
 
     // look for property path
-    while let Some((Token::Path(id), tokens)) = match_token(tokens_slice, Matcher::Path) {
+    while let Some((Token(Terminal::Path(id), _, _), tokens)) =
+        match_token(tokens_slice, Matcher::Path)
+    {
         // look for operator (equal, contains, ...) and potential negation
         let negated = match_token(tokens, Matcher::Negation).is_some();
         let tokens = if negated { &tokens[1..] } else { tokens };
@@ -172,7 +175,7 @@ fn parse_filters<'a>(
             ));
         }
 
-        if let Some((_, tokens)) = match_token(tokens_slice, Matcher::Exact(Token::Comma)) {
+        if let Some((_, tokens)) = match_token(tokens_slice, Matcher::Exact(Terminal::Comma)) {
             tokens_slice = tokens;
             filter_idx += 1;
         } else {
@@ -196,13 +199,14 @@ mod tests {
     fn token_matching() {
         let tokens = tokenize("{ meta.focal_length }").unwrap();
 
-        let tokens = match_token(tokens.as_slice(), Matcher::Exact(Token::CurlyOpen));
+        let tokens = match_token(tokens.as_slice(), Matcher::Exact(Terminal::CurlyOpen));
         assert!(tokens.is_some());
 
         let tokens = match_token(tokens.unwrap().1, Matcher::Path);
-        assert_eq!(tokens.unwrap().0, &Token::Path("meta.focal_length"));
+        let Token(terminal, start, end) = tokens.unwrap().0;
+        assert_eq!(terminal, &Terminal::Path("meta.focal_length"));
 
-        let tokens = match_token(tokens.unwrap().1, Matcher::Exact(Token::CurlyClose));
+        let tokens = match_token(tokens.unwrap().1, Matcher::Exact(Terminal::CurlyClose));
         assert!(tokens.is_some());
     }
 
@@ -267,7 +271,6 @@ mod tests {
         assert_eq!(expr, ParseError::MalformedExpression);
     }
 
-
     #[test]
     fn invalid_operator() {
         let tokens = tokenize("{ meta.tag !+ \"wrong\" }").unwrap();
@@ -287,6 +290,28 @@ mod tests {
         assert_eq!(
             expr,
             ParseError::MalformedFilterValue(0, "meta.tag".to_string())
+        );
+    }
+    #[test]
+
+    fn missing_value() {
+        let tokens = tokenize("{ meta.tag= }").unwrap();
+        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+
+        assert_eq!(
+            expr,
+            ParseError::MalformedFilterValue(0, "meta.tag".to_string())
+        );
+    }
+
+    #[test]
+    fn invalid_value_other_filter() {
+        let tokens = tokenize("{ meta.tag != \"boo\", meta.focal=invalid}").unwrap();
+        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+
+        assert_eq!(
+            expr,
+            ParseError::MalformedFilterValue(1, "meta.focal".to_string())
         );
     }
 }
