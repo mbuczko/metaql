@@ -1,0 +1,22 @@
+kind: pipeline
+type: docker
+name: develop
+trigger:
+  branch:
+  - develop
+  
+steps: 
+  - name: test
+    image: rustlang/rust:nightly-bullseye-slim
+    volumes:
+      - name: cache
+        path: /drone/.cargo
+    commands:
+      - export CARGO_HOME=/drone/.cargo
+      - cargo build
+      - cargo test
+      
+volumes:
+- name: cache
+  host:
+    path: /tmp/drone/cache/cargo

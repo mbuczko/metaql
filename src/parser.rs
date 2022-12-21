@@ -9,7 +9,10 @@ use crate::lexer::{tokenize, Terminal, Token};
 /// filter   ->  PATH op value
 /// op       ->  "!"? (EQ | CONTAINS)
 /// value    ->  STRING | BOOL | numeric
-/// numeric  ->  "-"? (INTEGER | FLOAT)
+/// numeric  ->  (INTEGER | FLOAT)
+/// range    ->  SQARE_OPEN duration SQUARE_CLOSE
+/// duration ->  INTEGER unit
+/// unit     ->  "ms" | "s" | "m" | "h" | "d" | "w" | "y"
 
 #[derive(Debug, PartialEq)]
 enum Operator {
