@@ -94,12 +94,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                             continue;
                         }
                         // a float number, maybe?
-                        if *ch == '.' {
-                            if !point {
-                                chars.next();
-                                point = true;
-                                continue;
-                            }
+                        if *ch == '.' && !point {
+                            chars.next();
+                            point = true;
+                            continue;
                         }
                     }
                     break if point {
