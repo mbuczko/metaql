@@ -49,24 +49,27 @@ pub struct Filter<'a> {
     path: Vec<&'a str>, // property path split by dot
     value: Value,
     op: Operator,
-    negated: bool,
+    opNegative: bool,
 }
 
 #[derive(Debug)]
 pub struct Range {}
+
+#[derive(Debug, PartialEq)]
+pub struct ErrorOffset(usize);
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ParseError {
     #[error("malformed expression")]
     MalformedExpression,
     #[error("malformed filter")]
-    MalformedFilter(u8),
+    MalformedFilter(ErrorOffset),
     #[error("filter value expected")]
-    MalformedFilterValue(u8, String),
+    MalformedFilterValue(ErrorOffset, String),
     #[error("filter operator expected")]
-    MalformedFilterOperator(u8, String),
+    MalformedFilterOperator(ErrorOffset, String),
     #[error("filter separator (comma) expected")]
-    UnknownFilterSeparator(u8),
+    UnknownFilterSeparator,
     #[error("unknown value type")]
     UnknownFilterValueType,
     #[error("unknown filter operator")]
@@ -136,7 +139,10 @@ pub fn parse_expression<'a>(tokens: &'a [Token]) -> Result<Expr<'a>, ParseError>
             let range = Some(Range {});
             return Ok(Expr { filters, range });
         }
+        // something's wrong with filter path
+        return Err(ParseError::MalformedFilter(ErrorOffset(tokens[0].2)));
     }
+    // entire expression starts with wrong token
     Err(ParseError::MalformedExpression)
 }
 
@@ -145,39 +151,41 @@ fn parse_filters<'a>(
 ) -> Result<(Vec<Filter<'a>>, &'a [Token<'a>]), ParseError> {
     let mut filters = Vec::<Filter>::new();
     let mut tokens_slice = tokens;
-    let mut filter_idx = 0;
 
-    // look for property path
+    // look for property path first...
     while let Some((Token(Terminal::Path(id), _, _), tokens)) =
         match_token(tokens_slice, Matcher::Path)
     {
-        // look for operator (equal, contains, ...) and potential negation
-        let negated = match_token(tokens, Matcher::Negation).is_some();
-        let tokens = if negated { &tokens[1..] } else { tokens };
+        // ...then look for operator (equal, contains, ...) and its potential negation
+        let negative = match_token(tokens, Matcher::Negation).is_some();
+        let tokens = if negative { &tokens[1..] } else { tokens };
 
         if let Some((op, tokens)) = match_token(tokens, Matcher::Operator) {
-            // look for a value and compose a `Filter` if all elements have been matched correctly
+            // at last...
+            // look for filter value and if it matches one of possible variants - compose a `Filter`
             if let Some((val, tokens)) = match_token(tokens, Matcher::Value) {
                 tokens_slice = tokens;
                 filters.push(Filter {
                     path: id.to_owned().split('.').collect::<Vec<_>>(),
                     value: Value::try_from(val)?,
                     op: Operator::try_from(op)?,
-                    negated,
+                    opNegative: negative,
                 });
             } else {
-                return Err(ParseError::MalformedFilterValue(filter_idx, id.to_string()));
+                return Err(ParseError::MalformedFilterValue(
+                    ErrorOffset(op.2 + 1),
+                    id.to_string(),
+                ));
             }
         } else {
             return Err(ParseError::MalformedFilterOperator(
-                filter_idx,
+                ErrorOffset(tokens[0].2),
                 id.to_string(),
             ));
         }
 
         if let Some((_, tokens)) = match_token(tokens_slice, Matcher::Exact(Terminal::Comma)) {
             tokens_slice = tokens;
-            filter_idx += 1;
         } else {
             break;
         }
@@ -196,14 +204,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn invalid_expression() {
+        let tokens = tokenize("[ meta.tag != \"boo\"]").unwrap();
+        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+
+        assert_eq!(expr, ParseError::MalformedExpression);
+    }
+
+    #[test]
+    fn empty_expression() {
+        let tokens = tokenize("{}").unwrap();
+        let expr = parse_expression(tokens.as_slice()).unwrap();
+
+        assert_eq!(expr.filters.len(), 0);
+    }
+
+    #[test]
+    fn empty_input() {
+        let tokens = tokenize("").unwrap();
+        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+
+        assert_eq!(expr, ParseError::MalformedExpression);
+    }
+
+    #[test]
     fn token_matching() {
         let tokens = tokenize("{ meta.focal_length }").unwrap();
-
         let tokens = match_token(tokens.as_slice(), Matcher::Exact(Terminal::CurlyOpen));
         assert!(tokens.is_some());
 
         let tokens = match_token(tokens.unwrap().1, Matcher::Path);
-        let Token(terminal, start, end) = tokens.unwrap().0;
+        let Token(terminal, _start, _end) = tokens.unwrap().0;
         assert_eq!(terminal, &Terminal::Path("meta.focal_length"));
 
         let tokens = match_token(tokens.unwrap().1, Matcher::Exact(Terminal::CurlyClose));
@@ -224,7 +255,7 @@ mod tests {
         assert_eq!(filter.path, vec!["meta", "focal_length"]);
         assert_eq!(filter.op, Operator::Equal);
         assert_eq!(filter.value, Value::Float(2.3));
-        assert!(!filter.negated);
+        assert!(!filter.opNegative);
     }
 
     #[test]
@@ -241,7 +272,7 @@ mod tests {
         assert_eq!(filter.path, vec!["meta", "tag"]);
         assert_eq!(filter.op, Operator::Contains);
         assert_eq!(filter.value, Value::String("favourite".to_string()));
-        assert!(filter.negated);
+        assert!(filter.opNegative);
     }
 
     #[test]
@@ -255,20 +286,20 @@ mod tests {
         assert_eq!(second.path, vec!["meta", "focal", "length"]);
         assert_eq!(second.value, Value::Integer(3));
         assert_eq!(second.op, Operator::Equal);
-        assert!(!second.negated);
+        assert!(!second.opNegative);
 
         let first = expr.filters.pop().unwrap();
         assert_eq!(first.path, vec!["meta", "tag"]);
         assert_eq!(first.value, Value::String("favourite".to_string()));
         assert_eq!(first.op, Operator::Equal);
-        assert!(first.negated);
+        assert!(first.opNegative);
     }
 
     #[test]
     fn multiple_filters_invalid_separator() {
         let tokens = tokenize("{ meta.tag != \"favourite\"; meta.focal_length=3.2 }").unwrap();
         let expr = parse_expression(tokens.as_slice()).unwrap_err();
-        assert_eq!(expr, ParseError::MalformedExpression);
+        assert_eq!(expr, ParseError::MalformedFilter(ErrorOffset(25)));
     }
 
     #[test]
@@ -278,7 +309,7 @@ mod tests {
 
         assert_eq!(
             expr,
-            ParseError::MalformedFilterOperator(0, "meta.tag".to_string())
+            ParseError::MalformedFilterOperator(ErrorOffset(12), "meta.tag".to_string())
         );
     }
 
@@ -289,18 +320,18 @@ mod tests {
 
         assert_eq!(
             expr,
-            ParseError::MalformedFilterValue(0, "meta.tag".to_string())
+            ParseError::MalformedFilterValue(ErrorOffset(13), "meta.tag".to_string())
         );
     }
-    #[test]
 
+    #[test]
     fn missing_value() {
         let tokens = tokenize("{ meta.tag= }").unwrap();
         let expr = parse_expression(tokens.as_slice()).unwrap_err();
 
         assert_eq!(
             expr,
-            ParseError::MalformedFilterValue(0, "meta.tag".to_string())
+            ParseError::MalformedFilterValue(ErrorOffset(11), "meta.tag".to_string())
         );
     }
 
@@ -311,7 +342,15 @@ mod tests {
 
         assert_eq!(
             expr,
-            ParseError::MalformedFilterValue(1, "meta.focal".to_string())
+            ParseError::MalformedFilterValue(ErrorOffset(32), "meta.focal".to_string())
         );
+    }
+
+    #[test]
+    fn invalid_path_other_filter() {
+        let tokens = tokenize("{ meta.tag != \"boo\", +=true}").unwrap();
+        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+
+        assert_eq!(expr, ParseError::MalformedFilter(ErrorOffset(21)));
     }
 }

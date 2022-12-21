@@ -185,13 +185,13 @@ mod tests {
 
     #[test]
     fn simple_tokens() {
-        let result = tokenize("{ { } }").unwrap();
+        let result = tokenize("{  ()  }").unwrap();
         assert_eq!(
             result,
             vec![
                 Token(Terminal::CurlyOpen, 0, 0),
-                Token(Terminal::CurlyOpen, 2, 2),
-                Token(Terminal::CurlyClose, 4, 4),
+                Token(Terminal::RoundOpen, 3, 3),
+                Token(Terminal::RoundClose, 4, 4),
                 Token(Terminal::CurlyClose, 6, 6)
             ]
         );
