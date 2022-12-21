@@ -325,6 +325,16 @@ mod tests {
     }
 
     #[test]
+    fn negative_value() {
+        let tokens = tokenize("{ meta.tag = -1 }").unwrap();
+        let mut expr = parse_expression(tokens.as_slice()).unwrap();
+
+        let first = expr.filters.pop().unwrap();
+        assert_eq!(first.path, vec!["meta", "tag"]);
+        assert_eq!(first.value, Value::Integer(-1));
+    }
+
+    #[test]
     fn missing_value() {
         let tokens = tokenize("{ meta.tag= }").unwrap();
         let expr = parse_expression(tokens.as_slice()).unwrap_err();

@@ -48,8 +48,8 @@ pub enum TokenizeError {
     InvalidString(usize),
     #[error("unbalanced braces")]
     UnbalancedBraces(usize, Brace),
-    #[error("malformed float number")]
-    MalformedFloat(usize),
+    #[error("malformed numeric value")]
+    MalformedNumeric(usize),
 }
 
 fn whitespace(ch: char) -> bool {
@@ -83,7 +83,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                     };
                 }
             }
-            b if b.is_numeric() => {
+            b if b.is_numeric() || b == '-' => {
                 let mut eoi = pos;
                 let mut point = false;
                 loop {
@@ -107,14 +107,20 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                             Terminal::Float(
                                 input[pos..eoi + 1]
                                     .parse()
-                                    .map_err(|_| TokenizeError::MalformedFloat(eoi))?
+                                    .map_err(|_| TokenizeError::MalformedNumeric(eoi))?,
                             ),
-                            pos, eoi
+                            pos,
+                            eoi,
                         )
                     } else {
                         Token(
-                            Terminal::Integer(input[pos..eoi + 1].parse().unwrap()),
-                            pos, eoi
+                            Terminal::Integer(
+                                input[pos..eoi + 1]
+                                    .parse()
+                                    .map_err(|_| TokenizeError::MalformedNumeric(eoi))?,
+                            ),
+                            pos,
+                            eoi,
                         )
                     };
                 }
@@ -122,7 +128,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             '"' => loop {
                 if let Some((p, ch)) = chars.next() {
                     if ch == '"' {
-                        break Token(Terminal::String(&input[pos + 1..p]), pos, p)
+                        break Token(Terminal::String(&input[pos + 1..p]), pos, p);
                     }
                 } else {
                     return Err(TokenizeError::InvalidString(pos));
@@ -294,5 +300,36 @@ mod tests {
                 Token(Terminal::CurlyClose, 12, 12)
             ]
         );
+    }
+    #[test]
+    fn negative() {
+        let result = tokenize("-10 -3.12").unwrap();
+        assert_eq!(
+            result,
+            vec![
+                Token(Terminal::Integer(-10), 0, 2),
+                Token(Terminal::Float(-3.12), 4, 8)
+            ]
+        )
+    }
+    #[test]
+    fn invalid_negative() {
+        let result = tokenize("-\"negative\"").unwrap_err();
+        assert_eq!(result, TokenizeError::MalformedNumeric(0));
+
+        let result = tokenize("-true").unwrap_err();
+        assert_eq!(result, TokenizeError::MalformedNumeric(0));
+    }
+    #[test]
+    fn booleans() {
+        let result = tokenize("true flase false").unwrap();
+        assert_eq!(
+            result,
+            vec![
+                Token(Terminal::Bool(true), 0, 3),
+                Token(Terminal::Path("flase"), 5, 9),
+                Token(Terminal::Bool(false), 11, 15)
+            ]
+        )
     }
 }
