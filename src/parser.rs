@@ -235,9 +235,9 @@ fn parse_range<'a>(tokens: &'a [Token]) -> Result<(Option<Range>, &'a [Token<'a>
                     Terminal::Path(s) => RangeUnit::try_from(s),
                     _ => Ok(RangeUnit::Minutes)
                 })
-                .unwrap_or(Ok(RangeUnit::Minutes));
+                .unwrap_or(Ok(RangeUnit::Minutes))?;
 
-            return Ok((Some(Range(int, unit.unwrap())), tokens));
+            return Ok((Some(Range(int, unit)), tokens));
         }
     }
     Ok((None, tokens))
