@@ -198,30 +198,22 @@ fn parse_filters<'a>(
         // ...then look for operator (equal, contains, ...) and its potential negation
         let negative = match_token(tokens, Matcher::Negation).is_some();
         let tokens = if negative { &tokens[1..] } else { tokens };
+        let (op, tokens) = match_token(tokens, Matcher::Operator).ok_or_else(|| {
+            ParseError::MalformedFilterOperator(ErrorOffset(tokens[0].2), id.to_string())
+        })?;
 
-        if let Some((op, tokens)) = match_token(tokens, Matcher::Operator) {
-            // at last...
-            // look for filter value and if it matches one of possible variants - compose a `Filter`
-            if let Some((val, tokens)) = match_token(tokens, Matcher::Value) {
-                tokens_slice = tokens;
-                filters.push(Filter {
-                    path: id.to_owned().split('.').collect::<Vec<_>>(),
-                    value: Value::try_from(val)?,
-                    op: Operator::try_from(op)?,
-                    op_negative: negative,
-                });
-            } else {
-                return Err(ParseError::MalformedFilterValue(
-                    ErrorOffset(op.2 + 1),
-                    id.to_string(),
-                ));
-            }
-        } else {
-            return Err(ParseError::MalformedFilterOperator(
-                ErrorOffset(tokens[0].2),
-                id.to_string(),
-            ));
-        }
+        // ...then look for filter value and if it matches one of possible variants - compose a `Filter`
+        let (val, tokens) = match_token(tokens, Matcher::Value).ok_or_else(|| {
+            ParseError::MalformedFilterValue(ErrorOffset(op.2 + 1), id.to_string())
+        })?;
+
+        tokens_slice = tokens;
+        filters.push(Filter {
+            path: id.to_owned().split('.').collect::<Vec<_>>(),
+            value: Value::try_from(val)?,
+            op: Operator::try_from(op)?,
+            op_negative: negative,
+        });
 
         if let Some((_, tokens)) = match_token(tokens_slice, Matcher::Exact(Terminal::Comma)) {
             tokens_slice = tokens;
@@ -234,22 +226,17 @@ fn parse_filters<'a>(
 
 fn parse_range<'a>(tokens: &'a [Token]) -> Result<(Option<Range>, &'a [Token<'a>]), ParseError> {
     if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Terminal::SquareOpen)) {
-        if let Some((Token(Terminal::Integer(int), _, _), tokens)) =
-            match_token(tokens, Matcher::Integer)
-        {
-            // minutes are default unit
-            let mut unit = RangeUnit::Minutes;
+        let (token, tokens) = match_token(tokens, Matcher::Integer)
+            .ok_or_else(|| ParseError::MalformedRangeValue(ErrorOffset(tokens[0].2 + 1)))?;
 
-            if let Some((Token(Terminal::Path(s), _, _), _)) =
-                match_token(tokens, Matcher::Path)
-            {
-                unit = RangeUnit::try_from(*s)?;
-            }
-            return Ok((Some(Range(*int, unit)), tokens));
-        }
-        return Err(ParseError::MalformedRangeValue(ErrorOffset(
-            tokens[0].2 + 1,
-        )));
+        let Token(Terminal::Integer(int), _, _) = *token;
+
+        let unit = match_token(tokens, Matcher::Path)
+            .map(|(Token(Terminal::Path(s), _, _), _)| RangeUnit::try_from(*s))
+            .unwrap_or(Ok(RangeUnit::Minutes));
+
+
+        return Ok((Some(Range(int, unit.unwrap())), tokens));
     }
     Ok((None, tokens))
 }
@@ -468,5 +455,4 @@ mod tests {
 
         assert_eq!(result, ParseError::UnknownRangeUnit);
     }
-
 }
