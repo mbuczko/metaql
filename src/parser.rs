@@ -12,7 +12,7 @@ use crate::lexer::{tokenize, Terminal, Token};
 /// numeric  ->  (INTEGER | FLOAT)
 /// range    ->  SQARE_OPEN duration SQUARE_CLOSE
 /// duration ->  INTEGER unit
-/// unit     ->  "ms" | "s" | "m" | "h" | "d" | "w" | "y"
+/// unit     ->  "ms" | "s" | "m" | "h" | "d" | "w" | "mo" | "y"
 
 #[derive(Debug, PartialEq)]
 enum Operator {
@@ -52,11 +52,23 @@ pub struct Filter<'a> {
     path: Vec<&'a str>, // property path split by dot
     value: Value,
     op: Operator,
-    opNegative: bool,
+    op_negative: bool,
 }
 
 #[derive(Debug)]
-pub struct Range {}
+pub struct Range(i32, RangeUnit);
+
+#[derive(Debug, PartialEq)]
+pub enum RangeUnit {
+    Milliseconds,
+    Seconds,
+    Minutes,
+    Hours,
+    Days,
+    Weeks,
+    Months,
+    Years,
+}
 
 #[derive(Debug, PartialEq)]
 pub struct ErrorOffset(usize);
@@ -71,12 +83,36 @@ pub enum ParseError {
     MalformedFilterValue(ErrorOffset, String),
     #[error("filter operator expected")]
     MalformedFilterOperator(ErrorOffset, String),
+    #[error("malformed range")]
+    MalformedRange(ErrorOffset),
+    #[error("range value (integer) expected")]
+    MalformedRangeValue(ErrorOffset),
     #[error("filter separator (comma) expected")]
     UnknownFilterSeparator,
     #[error("unknown value type")]
     UnknownFilterValueType,
     #[error("unknown filter operator")]
     UnknownFilterOperator,
+    #[error("unknown range unit")]
+    UnknownRangeUnit,
+}
+
+impl TryFrom<&str> for RangeUnit {
+    type Error = ParseError;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "ms" => Ok(Self::Milliseconds),
+            "s" => Ok(Self::Seconds),
+            "m" => Ok(Self::Minutes),
+            "h" => Ok(Self::Hours),
+            "d" => Ok(Self::Days),
+            "w" => Ok(Self::Weeks),
+            "mo" => Ok(Self::Months),
+            "y" => Ok(Self::Years),
+            _ => Err(ParseError::UnknownRangeUnit),
+        }
+    }
 }
 
 impl<'a> TryFrom<&Token<'a>> for Value {
@@ -139,7 +175,7 @@ pub fn parse_expression<'a>(tokens: &'a [Token]) -> Result<Expr<'a>, ParseError>
 
         // curly closing brace = end of filters
         if let Some((_, _tokens)) = match_token(tokens, Matcher::Exact(Terminal::CurlyClose)) {
-            let range = Some(Range {});
+            let range = Some(Range(0, RangeUnit::Minutes));
             return Ok(Expr { filters, range });
         }
         // something's wrong with filter path
@@ -172,7 +208,7 @@ fn parse_filters<'a>(
                     path: id.to_owned().split('.').collect::<Vec<_>>(),
                     value: Value::try_from(val)?,
                     op: Operator::try_from(op)?,
-                    opNegative: negative,
+                    op_negative: negative,
                 });
             } else {
                 return Err(ParseError::MalformedFilterValue(
@@ -194,6 +230,28 @@ fn parse_filters<'a>(
         }
     }
     Ok((filters, tokens_slice))
+}
+
+fn parse_range<'a>(tokens: &'a [Token]) -> Result<(Option<Range>, &'a [Token<'a>]), ParseError> {
+    if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Terminal::SquareOpen)) {
+        if let Some((Token(Terminal::Integer(int), _, _), tokens)) =
+            match_token(tokens, Matcher::Integer)
+        {
+            // minutes are default unit
+            let mut unit = RangeUnit::Minutes;
+
+            if let Some((Token(Terminal::Path(s), _, _), _)) =
+                match_token(tokens, Matcher::Path)
+            {
+                unit = RangeUnit::try_from(*s)?;
+            }
+            return Ok((Some(Range(*int, unit)), tokens));
+        }
+        return Err(ParseError::MalformedRangeValue(ErrorOffset(
+            tokens[0].2 + 1,
+        )));
+    }
+    Ok((None, tokens))
 }
 
 pub fn main() {
@@ -258,7 +316,7 @@ mod tests {
         assert_eq!(filter.path, vec!["meta", "focal_length"]);
         assert_eq!(filter.op, Operator::Equal);
         assert_eq!(filter.value, Value::Float(2.3));
-        assert!(!filter.opNegative);
+        assert!(!filter.op_negative);
     }
 
     #[test]
@@ -275,7 +333,7 @@ mod tests {
         assert_eq!(filter.path, vec!["meta", "tag"]);
         assert_eq!(filter.op, Operator::Contains);
         assert_eq!(filter.value, Value::String("favourite".to_string()));
-        assert!(filter.opNegative);
+        assert!(filter.op_negative);
     }
 
     #[test]
@@ -289,13 +347,13 @@ mod tests {
         assert_eq!(second.path, vec!["meta", "focal", "length"]);
         assert_eq!(second.value, Value::Integer(3));
         assert_eq!(second.op, Operator::Equal);
-        assert!(!second.opNegative);
+        assert!(!second.op_negative);
 
         let first = expr.filters.pop().unwrap();
         assert_eq!(first.path, vec!["meta", "tag"]);
         assert_eq!(first.value, Value::String("favourite".to_string()));
         assert_eq!(first.op, Operator::Equal);
-        assert!(first.opNegative);
+        assert!(first.op_negative);
     }
 
     #[test]
@@ -306,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_operator() {
+    fn invalid_filter_operator() {
         let tokens = tokenize("{ meta.tag !+ \"wrong\" }").unwrap();
         let expr = parse_expression(tokens.as_slice()).unwrap_err();
 
@@ -317,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_value() {
+    fn invalid_filter_value() {
         let tokens = tokenize("{ meta.tag != invalid }").unwrap();
         let expr = parse_expression(tokens.as_slice()).unwrap_err();
 
@@ -328,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn negative_value() {
+    fn negative_filter_value() {
         let tokens = tokenize("{ meta.tag = -1 }").unwrap();
         let mut expr = parse_expression(tokens.as_slice()).unwrap();
 
@@ -338,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_value() {
+    fn missing_filter_value() {
         let tokens = tokenize("{ meta.tag= }").unwrap();
         let expr = parse_expression(tokens.as_slice()).unwrap_err();
 
@@ -349,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn invalid_value_other_filter() {
+    fn invalid_filter_value_other() {
         let tokens = tokenize("{ meta.tag != \"boo\", meta.focal=invalid}").unwrap();
         let expr = parse_expression(tokens.as_slice()).unwrap_err();
 
@@ -360,10 +418,55 @@ mod tests {
     }
 
     #[test]
-    fn invalid_path_other_filter() {
+    fn invalid_path_filter_other() {
         let tokens = tokenize("{ meta.tag != \"boo\", +=true}").unwrap();
         let expr = parse_expression(tokens.as_slice()).unwrap_err();
 
         assert_eq!(expr, ParseError::MalformedFilter(ErrorOffset(21)));
     }
+
+    #[test]
+    fn valid_range() {
+        let tokens = tokenize("[10d]").unwrap();
+        let (opt, _) = parse_range(tokens.as_slice()).unwrap();
+        let range = opt.unwrap();
+
+        assert_eq!(range.0, 10);
+        assert_eq!(range.1, RangeUnit::Days);
+    }
+
+    #[test]
+    fn default_range() {
+        let tokens = tokenize("[10]").unwrap();
+        let (opt, _) = parse_range(tokens.as_slice()).unwrap();
+        let range = opt.unwrap();
+
+        assert_eq!(range.0, 10);
+        assert_eq!(range.1, RangeUnit::Minutes);
+    }
+
+    #[test]
+    fn invalid_range() {
+        let tokens = tokenize("  (10)").unwrap();
+        let (opt, _) = parse_range(tokens.as_slice()).unwrap();
+
+        assert!(opt.is_none())
+    }
+
+    #[test]
+    fn invalid_range_value() {
+        let tokens = tokenize("[none]").unwrap();
+        let result = parse_range(tokens.as_slice()).unwrap_err();
+
+        assert_eq!(result, ParseError::MalformedRangeValue(ErrorOffset(5)));
+    }
+
+    #[test]
+    fn invalid_range_unit() {
+        let tokens = tokenize("[10none]").unwrap();
+        let result = parse_range(tokens.as_slice()).unwrap_err();
+
+        assert_eq!(result, ParseError::UnknownRangeUnit);
+    }
+
 }
