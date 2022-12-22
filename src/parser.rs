@@ -229,14 +229,16 @@ fn parse_range<'a>(tokens: &'a [Token]) -> Result<(Option<Range>, &'a [Token<'a>
         let (token, tokens) = match_token(tokens, Matcher::Integer)
             .ok_or_else(|| ParseError::MalformedRangeValue(ErrorOffset(tokens[0].2 + 1)))?;
 
-        let Token(Terminal::Integer(int), _, _) = *token;
+        if let Terminal::Integer(int) = token.0 {
+            let unit = match_token(tokens, Matcher::Path)
+                .map(|(token, _)| match token.0 {
+                    Terminal::Path(s) => RangeUnit::try_from(s),
+                    _ => Ok(RangeUnit::Minutes)
+                })
+                .unwrap_or(Ok(RangeUnit::Minutes));
 
-        let unit = match_token(tokens, Matcher::Path)
-            .map(|(Token(Terminal::Path(s), _, _), _)| RangeUnit::try_from(*s))
-            .unwrap_or(Ok(RangeUnit::Minutes));
-
-
-        return Ok((Some(Range(int, unit.unwrap())), tokens));
+            return Ok((Some(Range(int, unit.unwrap())), tokens));
+        }
     }
     Ok((None, tokens))
 }
