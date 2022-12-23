@@ -80,11 +80,11 @@ mod tests {
         );
         assert_eq!(
             op_to_condition_operator(crate::parser::Operator::Contains, false),
-            "LIKE"
+            " LIKE "
         );
         assert_eq!(
             op_to_condition_operator(crate::parser::Operator::Contains, true),
-            "NOT LIKE"
+            " NOT LIKE "
         );
     }
 
