@@ -215,6 +215,7 @@ fn parse_filters<'a>(
             op_negative: negative,
         });
 
+        // Comma found? There might be the other filters coming next.
         if let Some((_, tokens)) = match_token(tokens_slice, Matcher::Exact(Term::Comma)) {
             tokens_slice = tokens;
         } else {
