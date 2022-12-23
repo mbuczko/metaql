@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::lexer::{tokenize, Terminal, Token};
+use crate::lexer::{tokenize, Term, Token};
 
 /// Parser rules:
 ///
@@ -29,7 +29,7 @@ enum Value {
 }
 
 pub enum Matcher<'a> {
-    Exact(Terminal<'a>),
+    Exact(Term<'a>),
     Path,
     Operator,
     Negation,
@@ -120,10 +120,10 @@ impl<'a> TryFrom<&Token<'a>> for Value {
 
     fn try_from(value: &Token) -> Result<Self, Self::Error> {
         match value.0 {
-            Terminal::String(s) => Ok(Self::String(s.to_string())),
-            Terminal::Integer(i) => Ok(Self::Integer(i)),
-            Terminal::Float(f) => Ok(Self::Float(f)),
-            Terminal::Bool(b) => Ok(Self::Bool(b)),
+            Term::String(s) => Ok(Self::String(s.to_string())),
+            Term::Integer(i) => Ok(Self::Integer(i)),
+            Term::Float(f) => Ok(Self::Float(f)),
+            Term::Bool(b) => Ok(Self::Bool(b)),
             _ => Err(ParseError::UnknownFilterValueType),
         }
     }
@@ -134,8 +134,8 @@ impl<'a> TryFrom<&Token<'a>> for Operator {
 
     fn try_from(value: &Token) -> Result<Self, Self::Error> {
         match value.0 {
-            Terminal::Equal => Ok(Self::Equal),
-            Terminal::Contains => Ok(Self::Contains),
+            Term::Equal => Ok(Self::Equal),
+            Term::Contains => Ok(Self::Contains),
             _ => Err(ParseError::UnknownFilterOperator),
         }
     }
@@ -151,15 +151,15 @@ fn match_token<'a>(
             (Matcher::Exact(t), terminal) if t == *terminal => Some(token),
             (
                 Matcher::Value,
-                Terminal::String(_) | Terminal::Integer(_) | Terminal::Float(_) | Terminal::Bool(_),
+                Term::String(_) | Term::Integer(_) | Term::Float(_) | Term::Bool(_),
             ) => Some(token),
-            (Matcher::Path, Terminal::Path(_)) => Some(token),
-            (Matcher::Float, Terminal::Float(_)) => Some(token),
-            (Matcher::Bool, Terminal::Bool(_)) => Some(token),
-            (Matcher::Integer, Terminal::Integer(_)) => Some(token),
-            (Matcher::Numeric, Terminal::Integer(_) | Terminal::Float(_)) => Some(token),
-            (Matcher::Operator, Terminal::Equal | Terminal::Contains) => Some(token),
-            (Matcher::Negation, Terminal::Exclamation) => Some(token),
+            (Matcher::Path, Term::Path(_)) => Some(token),
+            (Matcher::Float, Term::Float(_)) => Some(token),
+            (Matcher::Bool, Term::Bool(_)) => Some(token),
+            (Matcher::Integer, Term::Integer(_)) => Some(token),
+            (Matcher::Numeric, Term::Integer(_) | Term::Float(_)) => Some(token),
+            (Matcher::Operator, Term::Equal | Term::Contains) => Some(token),
+            (Matcher::Negation, Term::Exclamation) => Some(token),
             _ => None,
         };
         if let Some(matched) = result {
@@ -170,11 +170,11 @@ fn match_token<'a>(
 }
 
 pub fn parse_expression<'a>(tokens: &'a [Token]) -> Result<Expr<'a>, ParseError> {
-    if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Terminal::CurlyOpen)) {
+    if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::CurlyOpen)) {
         let (filters, tokens) = parse_filters(tokens)?;
 
         // curly closing brace = end of filters
-        if let Some((_, _tokens)) = match_token(tokens, Matcher::Exact(Terminal::CurlyClose)) {
+        if let Some((_, _tokens)) = match_token(tokens, Matcher::Exact(Term::CurlyClose)) {
             let (range, _) = parse_range(tokens)?;
             return Ok(Expr { filters, range });
         }
@@ -192,7 +192,7 @@ fn parse_filters<'a>(
     let mut tokens_slice = tokens;
 
     // look for property path first...
-    while let Some((Token(Terminal::Path(id), _, _), tokens)) =
+    while let Some((Token(Term::Path(id), _, _), tokens)) =
         match_token(tokens_slice, Matcher::Path)
     {
         // ...then look for operator (equal, contains, ...) and its potential negation
@@ -215,7 +215,7 @@ fn parse_filters<'a>(
             op_negative: negative,
         });
 
-        if let Some((_, tokens)) = match_token(tokens_slice, Matcher::Exact(Terminal::Comma)) {
+        if let Some((_, tokens)) = match_token(tokens_slice, Matcher::Exact(Term::Comma)) {
             tokens_slice = tokens;
         } else {
             break;
@@ -225,14 +225,14 @@ fn parse_filters<'a>(
 }
 
 fn parse_range<'a>(tokens: &'a [Token]) -> Result<(Option<Range>, &'a [Token<'a>]), ParseError> {
-    if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Terminal::SquareOpen)) {
+    if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::SquareOpen)) {
         let (token, tokens) = match_token(tokens, Matcher::Integer)
             .ok_or_else(|| ParseError::MalformedRangeValue(ErrorOffset(tokens[0].2 + 1)))?;
 
-        if let Terminal::Integer(int) = token.0 {
+        if let Term::Integer(int) = token.0 {
             let unit = match_token(tokens, Matcher::Path)
                 .map(|(token, _)| match token.0 {
-                    Terminal::Path(s) => RangeUnit::try_from(s),
+                    Term::Path(s) => RangeUnit::try_from(s),
                     _ => Ok(RangeUnit::Minutes)
                 })
                 .unwrap_or(Ok(RangeUnit::Minutes))?;
@@ -280,14 +280,14 @@ mod tests {
     #[test]
     fn token_matching() {
         let tokens = tokenize("{ meta.focal_length }").unwrap();
-        let tokens = match_token(tokens.as_slice(), Matcher::Exact(Terminal::CurlyOpen));
+        let tokens = match_token(tokens.as_slice(), Matcher::Exact(Term::CurlyOpen));
         assert!(tokens.is_some());
 
         let tokens = match_token(tokens.unwrap().1, Matcher::Path);
         let Token(terminal, _start, _end) = tokens.unwrap().0;
-        assert_eq!(terminal, &Terminal::Path("meta.focal_length"));
+        assert_eq!(terminal, &Term::Path("meta.focal_length"));
 
-        let tokens = match_token(tokens.unwrap().1, Matcher::Exact(Terminal::CurlyClose));
+        let tokens = match_token(tokens.unwrap().1, Matcher::Exact(Term::CurlyClose));
         assert!(tokens.is_some());
     }
 
