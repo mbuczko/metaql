@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use thiserror::Error;
 
 use crate::lexer::{tokenize, Term, Token};
@@ -15,13 +17,13 @@ use crate::lexer::{tokenize, Term, Token};
 /// unit     ->  "ms" | "s" | "m" | "h" | "d" | "w" | "mo" | "y"
 
 #[derive(Debug, PartialEq)]
-enum Operator {
+pub enum Operator {
     Equal,
     Contains,
 }
 
 #[derive(Debug, PartialEq)]
-enum Value {
+pub enum Value {
     String(String),
     Integer(i32),
     Float(f32),
@@ -43,16 +45,16 @@ pub enum Matcher<'a> {
 
 #[derive(Debug)]
 pub struct Expr<'a> {
-    filters: Vec<Filter<'a>>,
-    range: Option<Range>,
+    pub filters: Vec<Filter<'a>>,
+    pub range: Option<Range>,
 }
 
 #[derive(Debug)]
 pub struct Filter<'a> {
-    path: Vec<&'a str>, // property path split by dot
-    value: Value,
-    op: Operator,
-    op_negative: bool,
+    pub path: Vec<&'a str>, // property path split by dot
+    pub value: Value,
+    pub op: Operator,
+    pub op_negative: bool,
 }
 
 #[derive(Debug)]
@@ -97,6 +99,16 @@ pub enum ParseError {
     UnknownRangeUnit,
 }
 
+impl Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::Integer(i) => write!(f, "{}",i),
+            Value::Float(l) => write!(f, "{}", l),
+            Value::Bool(b) => write!(f, "{}", b),
+            Value::String(s) => write!(f, "'{}'", s),
+        }
+    }
+}
 impl TryFrom<&str> for RangeUnit {
     type Error = ParseError;
 
@@ -137,6 +149,15 @@ impl<'a> TryFrom<&Token<'a>> for Operator {
             Term::Equal => Ok(Self::Equal),
             Term::Contains => Ok(Self::Contains),
             _ => Err(ParseError::UnknownFilterOperator),
+        }
+    }
+}
+
+impl Value {
+    pub fn to_query_string(&self, as_pattern: bool) -> String {
+        match self {
+            Self::String(s) if as_pattern => Value::String(format!("%{s}%")).to_string(),
+            other => other.to_string()
         }
     }
 }
