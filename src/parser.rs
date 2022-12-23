@@ -175,7 +175,7 @@ pub fn parse_expression<'a>(tokens: &'a [Token]) -> Result<Expr<'a>, ParseError>
 
         // curly closing brace = end of filters
         if let Some((_, _tokens)) = match_token(tokens, Matcher::Exact(Terminal::CurlyClose)) {
-            let range = Some(Range(0, RangeUnit::Minutes));
+            let (range, _) = parse_range(tokens)?;
             return Ok(Expr { filters, range });
         }
         // something's wrong with filter path
