@@ -5,25 +5,30 @@ use crate::{
     parser::{parse_expression, Operator},
 };
 
+#[derive(Debug, PartialEq)]
 pub struct Query {
-    pub conds: String,
+    pub stmt: String,
+    pub params: Vec<String>,
 }
 
-pub fn transform<I: AsRef<str>>(input: I) -> Result<String, Box<dyn Error>> {
+pub fn transform<I: AsRef<str>>(input: I) -> Result<Query, Box<dyn Error>> {
     let tokens = tokenize(input.as_ref())?;
     let expr = parse_expression(tokens.as_slice())?;
 
-    let mut s = String::new();
+    let mut stmt = String::new();
+    let mut params = Vec::with_capacity(5);
+
     for filter in expr.filters {
         let is_contains = filter.op == Operator::Contains;
-        if !s.is_empty() {
-            s.push_str(" AND ");
+        if !stmt.is_empty() {
+            stmt.push_str(" AND ");
         }
-        s.push_str(path_to_condition_lhs(filter.path).as_str());
-        s.push_str(op_to_condition_operator(filter.op, filter.op_negative).as_str());
-        s.push_str(filter.value.to_query_string(is_contains).as_str());
+        stmt.push_str(path_to_condition_lhs(filter.path).as_str());
+        stmt.push_str(op_to_condition_operator(filter.op, filter.op_negative).as_str());
+        stmt.push('?');
+        params.push(filter.value.to_query_string(is_contains));
     }
-    Ok(s)
+    Ok(Query { stmt, params })
 }
 
 fn op_to_condition_operator(op: Operator, negative: bool) -> String {
@@ -53,6 +58,8 @@ fn path_to_condition_lhs(path: Vec<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use crate::transformer::Query;
+
     use super::{op_to_condition_operator, path_to_condition_lhs, transform};
 
     #[test]
@@ -91,25 +98,49 @@ mod tests {
     #[test]
     fn simple_filter_to_condition() {
         let q = transform("{meta.focal_length=32}");
-        assert_eq!(q.unwrap(), "meta->>'focal_length'=32".to_string());
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "meta->>'focal_length'=?".to_string(),
+                params: vec!["32".to_string()]
+            }
+        );
     }
 
     #[test]
     fn nested_filter_to_condition() {
         let q = transform("{meta.focal.length=18.5}");
-        assert_eq!(q.unwrap(), "meta->'focal'->>'length'=18.5".to_string());
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "meta->'focal'->>'length'=?".to_string(),
+                params: vec!["18.5".to_string()]
+            }
+        );
     }
 
     #[test]
     fn pattern_string_filter_to_condition() {
         let q = transform("{meta.description !~ \"dog\"}");
-        assert_eq!(q.unwrap(), "meta->>'description' NOT LIKE '%dog%'".to_string());
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "meta->>'description' NOT LIKE ?".to_string(),
+                params: vec!["'%dog%'".to_string()]
+            }
+        );
     }
 
     #[test]
     fn exact_string_filter_to_condition() {
         let q = transform("{meta.description = \"dog\"}");
-        assert_eq!(q.unwrap(), "meta->>'description'='dog'".to_string());
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "meta->>'description'=?".to_string(),
+                params: vec!["'dog'".to_string()]
+            }
+        );
     }
 
     #[test]
@@ -117,7 +148,10 @@ mod tests {
         let q = transform("{favourite.tag ~ \"cats\", meta.focal.length=18.5}");
         assert_eq!(
             q.unwrap(),
-            "favourite->>'tag' LIKE '%cats%' AND meta->'focal'->>'length'=18.5".to_string()
+            Query {
+                stmt: "favourite->>'tag' LIKE ? AND meta->'focal'->>'length'=?".to_string(),
+                params: vec!["'%cats%'".to_string(), "18.5".to_string()]
+            }
         );
     }
 }

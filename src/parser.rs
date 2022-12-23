@@ -156,7 +156,7 @@ impl<'a> TryFrom<&Token<'a>> for Operator {
 impl Value {
     pub fn to_query_string(&self, as_pattern: bool) -> String {
         match self {
-            Self::String(s) if as_pattern => Value::String(format!("%{s}%")).to_string(),
+            Self::String(s) if as_pattern => Self::String(format!("%{s}%")).to_string(),
             other => other.to_string()
         }
     }
