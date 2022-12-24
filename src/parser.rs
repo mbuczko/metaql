@@ -57,7 +57,7 @@ pub struct Filter<'a> {
     pub op_negative: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Range(i32, RangeUnit);
 
 #[derive(Debug, PartialEq)]
@@ -162,6 +162,22 @@ impl Value {
     }
 }
 
+impl Range {
+    pub fn to_query_string(&self) -> String {
+        let unit = match self.1 {
+            RangeUnit::Milliseconds => "milliseconds",
+            RangeUnit::Seconds => "seconds",
+            RangeUnit::Minutes => "minutes",
+            RangeUnit::Hours => "hours",
+            RangeUnit::Days => "days",
+            RangeUnit::Weeks => "weeks",
+            RangeUnit::Months => "months",
+            RangeUnit::Years => "years",
+        };
+        format!("{} {}", self.0, unit)
+    }
+}
+
 fn match_token<'a>(
     tokens: &'a [Token],
     matcher: Matcher,
@@ -195,7 +211,7 @@ pub fn parse_expression<'a>(tokens: &'a [Token]) -> Result<Expr<'a>, ParseError>
         let (filters, tokens) = parse_filters(tokens)?;
 
         // curly closing brace = end of filters
-        if let Some((_, _tokens)) = match_token(tokens, Matcher::Exact(Term::CurlyClose)) {
+        if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::CurlyClose)) {
             let (range, _) = parse_range(tokens)?;
             return Ok(Expr { filters, range });
         }
@@ -479,4 +495,13 @@ mod tests {
 
         assert_eq!(result, ParseError::UnknownRangeUnit);
     }
+
+    #[test]
+    fn range_with_filters() {
+        let tokens = tokenize("{meta.tag=\"favourite\"}[10w]").unwrap();
+        let expr = parse_expression(tokens.as_slice()).unwrap();
+
+        assert_eq!(expr.range.unwrap(), Range(10, RangeUnit::Weeks));
+    }
+
 }

@@ -11,9 +11,14 @@ pub struct Query {
     pub params: Vec<String>,
 }
 
-pub fn transform<I: AsRef<str>>(input: I) -> Result<Query, Box<dyn Error>> {
+pub fn transform<I: AsRef<str>>(
+    input: I,
+    range_column: Option<&'static str>,
+) -> Result<Query, Box<dyn Error>> {
     let tokens = tokenize(input.as_ref())?;
     let expr = parse_expression(tokens.as_slice())?;
+
+    print!("{:?}", expr);
 
     let mut stmt = String::new();
     let mut params = Vec::with_capacity(5);
@@ -28,6 +33,19 @@ pub fn transform<I: AsRef<str>>(input: I) -> Result<Query, Box<dyn Error>> {
         stmt.push('?');
         params.push(filter.value.to_query_string(is_contains));
     }
+    if let Some(range_column) = range_column {
+        if let Some(range) = expr.range {
+            stmt.push_str(
+                format!(
+                    " AND {} >= now() - INTERVAL '{}'",
+                    range_column,
+                    range.to_query_string()
+                )
+                .as_str(),
+            );
+        }
+    }
+
     Ok(Query { stmt, params })
 }
 
@@ -97,7 +115,7 @@ mod tests {
 
     #[test]
     fn simple_filter_to_condition() {
-        let q = transform("{meta.focal_length=32}");
+        let q = transform("{meta.focal_length=32}", None);
         assert_eq!(
             q.unwrap(),
             Query {
@@ -109,7 +127,7 @@ mod tests {
 
     #[test]
     fn nested_filter_to_condition() {
-        let q = transform("{meta.focal.length=18.5}");
+        let q = transform("{meta.focal.length=18.5}", None);
         assert_eq!(
             q.unwrap(),
             Query {
@@ -121,7 +139,7 @@ mod tests {
 
     #[test]
     fn pattern_string_filter_to_condition() {
-        let q = transform("{meta.description !~ \"dog\"}");
+        let q = transform("{meta.description !~ \"dog\"}", None);
         assert_eq!(
             q.unwrap(),
             Query {
@@ -133,7 +151,7 @@ mod tests {
 
     #[test]
     fn exact_string_filter_to_condition() {
-        let q = transform("{meta.description = \"dog\"}");
+        let q = transform("{meta.description = \"dog\"}", None);
         assert_eq!(
             q.unwrap(),
             Query {
@@ -145,7 +163,7 @@ mod tests {
 
     #[test]
     fn multiple_filter_expr_to_query() {
-        let q = transform("{favourite.tag ~ \"cats\", meta.focal.length=18.5}");
+        let q = transform("{favourite.tag ~ \"cats\", meta.focal.length=18.5}", None);
         assert_eq!(
             q.unwrap(),
             Query {
@@ -154,4 +172,17 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn range_expr_to_query() {
+        let q = transform("{favourite.tag = \"cats\"}[10d]", Some("created_at"));
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "favourite->>'tag'=? AND created_at >= now() - INTERVAL '10 days'".to_string(),
+                params: vec!["'cats'".to_string()]
+            }
+        );
+    }
+
 }
