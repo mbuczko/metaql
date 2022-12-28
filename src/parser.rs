@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use thiserror::Error;
 
-use crate::lexer::{tokenize, Term, Token};
+use crate::lexer::{Term, Token};
 
 /// Parser rules:
 ///
@@ -30,6 +30,7 @@ pub enum Value {
     Bool(bool),
 }
 
+#[allow(dead_code)]
 pub enum Matcher<'a> {
     Exact(Term<'a>),
     Path,
@@ -156,9 +157,7 @@ impl<'a> TryFrom<&Token<'a>> for Operator {
 impl Value {
     pub fn patternize(self, op: &Operator) -> Self {
         match self {
-            Self::String(s) if *op == Operator::Contains => {
-                Self::String(format!("%{s}%"))
-            }
+            Self::String(s) if *op == Operator::Contains => Self::String(format!("%{s}%")),
             other => other,
         }
     }
@@ -282,14 +281,10 @@ fn parse_range<'a>(tokens: &'a [Token]) -> Result<(Option<Range>, &'a [Token<'a>
     Ok((None, tokens))
 }
 
-pub fn main() {
-    let tokens = tokenize("{meta.focal_length=2.15}").unwrap();
-    let res = parse_expression(tokens.as_slice());
-    println!("{:?}", res);
-}
-
 #[cfg(test)]
 mod tests {
+    use crate::lexer::tokenize;
+
     use super::*;
 
     #[test]

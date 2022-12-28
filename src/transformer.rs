@@ -42,7 +42,6 @@ pub fn transform<I: AsRef<str>>(
             );
         }
     }
-
     Ok(Query { stmt, params })
 }
 
