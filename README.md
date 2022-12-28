@@ -1,7 +1,7 @@
 [![Build Status](https://drone.rodzinks.pl/api/badges/michal/metaql/status.svg?ref=refs/heads/develop)](https://drone.rodzinks.pl/michal/metaql)
 
 The goal of this crate is to parse a simple query language, similar to one used by [Prometheus](https://prometheus.io/docs/prometheus/latest/querying/basics/).
-This basing grammar comes down to:
+Basing grammar considered here comes down to:
 
 ``` antlr
 expr     ->  query range?
