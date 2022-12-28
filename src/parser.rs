@@ -102,7 +102,7 @@ pub enum ParseError {
 impl Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Integer(i) => write!(f, "{}",i),
+            Value::Integer(i) => write!(f, "{}", i),
             Value::Float(l) => write!(f, "{}", l),
             Value::Bool(b) => write!(f, "{}", b),
             Value::String(s) => write!(f, "'{}'", s),
@@ -154,10 +154,12 @@ impl<'a> TryFrom<&Token<'a>> for Operator {
 }
 
 impl Value {
-    pub fn to_query_string(&self, as_pattern: bool) -> String {
+    pub fn patternize(self, op: &Operator) -> Self {
         match self {
-            Self::String(s) if as_pattern => Self::String(format!("%{s}%")).to_string(),
-            other => other.to_string()
+            Self::String(s) if *op == Operator::Contains => {
+                Self::String(format!("%{s}%"))
+            }
+            other => other,
         }
     }
 }
@@ -229,8 +231,7 @@ fn parse_filters<'a>(
     let mut tokens_slice = tokens;
 
     // look for property path first...
-    while let Some((Token(Term::Path(id), _, _), tokens)) =
-        match_token(tokens_slice, Matcher::Path)
+    while let Some((Token(Term::Path(id), _, _), tokens)) = match_token(tokens_slice, Matcher::Path)
     {
         // ...then look for operator (equal, contains, ...) and its potential negation
         let negative = match_token(tokens, Matcher::Negation).is_some();
@@ -271,7 +272,7 @@ fn parse_range<'a>(tokens: &'a [Token]) -> Result<(Option<Range>, &'a [Token<'a>
             let unit = match_token(tokens, Matcher::Path)
                 .map(|(token, _)| match token.0 {
                     Term::Path(s) => RangeUnit::try_from(s),
-                    _ => Ok(RangeUnit::Minutes)
+                    _ => Ok(RangeUnit::Minutes),
                 })
                 .unwrap_or(Ok(RangeUnit::Minutes))?;
 
@@ -503,5 +504,4 @@ mod tests {
 
         assert_eq!(expr.range.unwrap(), Range(10, RangeUnit::Weeks));
     }
-
 }

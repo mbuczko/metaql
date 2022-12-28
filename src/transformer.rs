@@ -2,13 +2,13 @@ use std::error::Error;
 
 use crate::{
     lexer::tokenize,
-    parser::{parse_expression, Operator},
+    parser::{parse_expression, Operator, Value},
 };
 
 #[derive(Debug, PartialEq)]
 pub struct Query {
     pub stmt: String,
-    pub params: Vec<String>,
+    pub params: Vec<Value>,
 }
 
 pub fn transform<I: AsRef<str>>(
@@ -18,20 +18,17 @@ pub fn transform<I: AsRef<str>>(
     let tokens = tokenize(input.as_ref())?;
     let expr = parse_expression(tokens.as_slice())?;
 
-    print!("{:?}", expr);
-
     let mut stmt = String::new();
     let mut params = Vec::with_capacity(5);
 
     for filter in expr.filters {
-        let is_contains = filter.op == Operator::Contains;
+        params.push(filter.value.patternize(&filter.op));
         if !stmt.is_empty() {
             stmt.push_str(" AND ");
         }
         stmt.push_str(path_to_condition_lhs(filter.path).as_str());
         stmt.push_str(op_to_condition_operator(filter.op, filter.op_negative).as_str());
         stmt.push('?');
-        params.push(filter.value.to_query_string(is_contains));
     }
     if let Some(range_column) = range_column {
         if let Some(range) = expr.range {
@@ -76,7 +73,7 @@ fn path_to_condition_lhs(path: Vec<&str>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use crate::transformer::Query;
+    use crate::{transformer::Query, parser::Value};
 
     use super::{op_to_condition_operator, path_to_condition_lhs, transform};
 
@@ -120,7 +117,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->>'focal_length'=?".to_string(),
-                params: vec!["32".to_string()]
+                params: vec![Value::Integer(32)]
             }
         );
     }
@@ -132,7 +129,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->'focal'->>'length'=?".to_string(),
-                params: vec!["18.5".to_string()]
+                params: vec![Value::Float(18.5)]
             }
         );
     }
@@ -144,7 +141,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->>'description' NOT LIKE ?".to_string(),
-                params: vec!["'%dog%'".to_string()]
+                params: vec![Value::String("%dog%".to_string())]
             }
         );
     }
@@ -156,7 +153,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->>'description'=?".to_string(),
-                params: vec!["'dog'".to_string()]
+                params: vec![Value::String("dog".to_string())]
             }
         );
     }
@@ -168,7 +165,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "favourite->>'tag' LIKE ? AND meta->'focal'->>'length'=?".to_string(),
-                params: vec!["'%cats%'".to_string(), "18.5".to_string()]
+                params: vec![Value::String("%cats%".to_string()), Value::Float(18.5)]
             }
         );
     }
@@ -180,7 +177,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "favourite->>'tag'=? AND created_at >= now() - INTERVAL '10 days'".to_string(),
-                params: vec!["'cats'".to_string()]
+                params: vec![Value::String("cats".to_string())]
             }
         );
     }
