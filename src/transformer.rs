@@ -20,6 +20,15 @@ pub enum Column<'a> {
 type Alias = &'static str;
 type Columns<'a> = HashMap<Column<'a>, Alias>;
 
+#[allow(unused_macros)]
+macro_rules! columns {
+    ($( $key: expr => $val: expr ),*) => {{
+         let mut map = ::std::collections::HashMap::new();
+         $( map.insert($key, $val); )*
+         map
+    }}
+}
+
 pub fn transform<I: AsRef<str>>(
     input: I,
     columns: Option<Columns>,
@@ -27,7 +36,8 @@ pub fn transform<I: AsRef<str>>(
     let tokens = tokenize(input.as_ref())?;
     let expr = parse_expression(tokens.as_slice())?;
 
-    let mut stmt = String::new();
+    let mut f_stmt = String::new();
+    let mut r_stmt = String::new();
     let mut params = Vec::with_capacity(5);
 
     for filter in expr.filters {
@@ -37,28 +47,34 @@ pub fn transform<I: AsRef<str>>(
             .as_ref()
             .map(|c| c.get(&Column::Filter(filter.path.first().unwrap())))
             .unwrap_or(None);
-        if !stmt.is_empty() {
-            stmt.push_str(" AND ");
+        if !f_stmt.is_empty() {
+            f_stmt.push_str(" AND ");
         }
-        stmt.push_str(path_to_condition_lhs(filter.path, column).as_str());
-        stmt.push_str(op_to_condition_operator(filter.op, filter.op_negative).as_str());
-        stmt.push('?');
+        f_stmt.push_str(path_to_condition_lhs(filter.path, column).as_str());
+        f_stmt.push_str(op_to_condition_operator(filter.op, filter.op_negative).as_str());
+        f_stmt.push('?');
     }
     if let Some(range) = expr.range {
         let columns = columns.expect("Range query condition requires column definition");
         let range_column = columns.get(&Column::Range).unwrap();
 
-        // TODO: filtrów może nie być!!!
-        stmt.push_str(
-            format!(
-                " AND {} >= now() - INTERVAL '{}'",
-                range_column,
-                range.to_query_string()
-            )
-            .as_str(),
+        r_stmt = format!(
+            "{} >= now() - INTERVAL '{}'",
+            range_column,
+            range.to_query_string()
         );
     }
-    Ok(Query { stmt, params })
+    Ok(Query {
+        stmt: [ensure_non_empty(&f_stmt), ensure_non_empty(&r_stmt)].join(" AND "),
+        params,
+    })
+}
+
+fn ensure_non_empty(cond: &str) -> &str {
+    if cond.is_empty() {
+        return "1=1";
+    }
+    cond
 }
 
 fn op_to_condition_operator(op: Operator, negative: bool) -> String {
@@ -85,8 +101,6 @@ fn path_to_condition_lhs(path: Vec<&str>, alias: Option<&Alias>) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use crate::{
         parser::Value,
         transformer::{Column, Query},
@@ -109,20 +123,19 @@ mod tests {
 
     #[test]
     fn json_query_compose_with_aliases() {
-        let mut columns = HashMap::new();
-
-        let col_matata = Column::Filter("matata");
-        let col_makuna = Column::Filter("makuna");
-
-        columns.insert(&col_matata, "ma.tata");
-        columns.insert(&col_makuna, "ma.kuna");
-
+        let columns = columns!(
+            Column::Filter("matata") => "ma.tata",
+            Column::Filter("makuna") => "ma.kuna"
+        );
         assert_eq!(
-            path_to_condition_lhs(vec!["matata"], columns.get(&col_matata)),
+            path_to_condition_lhs(vec!["matata"], columns.get(&Column::Filter("matata"))),
             "ma.tata"
         );
         assert_eq!(
-            path_to_condition_lhs(vec!["makuna", "kuna", "tata"], columns.get(&col_makuna)),
+            path_to_condition_lhs(
+                vec!["makuna", "kuna", "tata"],
+                columns.get(&Column::Filter("makuna"))
+            ),
             "ma.kuna->'kuna'->>'tata'"
         );
     }
@@ -148,12 +161,36 @@ mod tests {
     }
 
     #[test]
+    fn no_filter_no_range() {
+        let q = transform("{ }", Some(columns!(Column::Range => "created_at")));
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "1=1 AND 1=1".to_string(),
+                params: vec![]
+            }
+        );
+    }
+
+    #[test]
+    fn no_filter_with_range() {
+        let q = transform("{ }[10ms]", Some(columns!(Column::Range => "created_at")));
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "1=1 AND created_at >= now() - INTERVAL '10 milliseconds'".to_string(),
+                params: vec![]
+            }
+        );
+    }
+
+    #[test]
     fn simple_filter_to_condition() {
         let q = transform("{meta.focal_length=32}", None);
         assert_eq!(
             q.unwrap(),
             Query {
-                stmt: "meta->>'focal_length'=?".to_string(),
+                stmt: "meta->>'focal_length'=? AND 1=1".to_string(),
                 params: vec![Value::Integer(32)]
             }
         );
@@ -165,7 +202,7 @@ mod tests {
         assert_eq!(
             q.unwrap(),
             Query {
-                stmt: "meta->'focal'->>'length'=?".to_string(),
+                stmt: "meta->'focal'->>'length'=? AND 1=1".to_string(),
                 params: vec![Value::Float(18.5)]
             }
         );
@@ -177,7 +214,7 @@ mod tests {
         assert_eq!(
             q.unwrap(),
             Query {
-                stmt: "meta->>'description' NOT LIKE ?".to_string(),
+                stmt: "meta->>'description' NOT LIKE ? AND 1=1".to_string(),
                 params: vec![Value::String("%dog%".to_string())]
             }
         );
@@ -189,7 +226,7 @@ mod tests {
         assert_eq!(
             q.unwrap(),
             Query {
-                stmt: "meta->>'description'=?".to_string(),
+                stmt: "meta->>'description'=? AND 1=1".to_string(),
                 params: vec![Value::String("dog".to_string())]
             }
         );
@@ -201,7 +238,7 @@ mod tests {
         assert_eq!(
             q.unwrap(),
             Query {
-                stmt: "favourite->>'tag' LIKE ? AND meta->'focal'->>'length'=?".to_string(),
+                stmt: "favourite->>'tag' LIKE ? AND meta->'focal'->>'length'=? AND 1=1".to_string(),
                 params: vec![Value::String("%cats%".to_string()), Value::Float(18.5)]
             }
         );
@@ -209,14 +246,14 @@ mod tests {
 
     #[test]
     fn aliased_filter_expr_to_query() {
-        let mut columns = HashMap::new();
-        columns.insert(Column::Filter("favourite"), "u.favourite");
-
-        let q = transform("{favourite.tag = \"cats\"}", Some(columns));
+        let q = transform(
+            "{favourite.tag = \"cats\"}",
+            Some(columns!(Column::Filter("favourite") => "u.favourite")),
+        );
         assert_eq!(
             q.unwrap(),
             Query {
-                stmt: "u.favourite->>'tag'=?".to_string(),
+                stmt: "u.favourite->>'tag'=? AND 1=1".to_string(),
                 params: vec![Value::String("cats".to_string())]
             }
         );
@@ -224,10 +261,10 @@ mod tests {
 
     #[test]
     fn range_expr_to_query() {
-        let mut columns = HashMap::new();
-        columns.insert(Column::Range, "created_at");
-        columns.insert(Column::Filter("favourite"), "u.favourite");
-
+        let columns = columns!(
+            Column::Range => "created_at",
+            Column::Filter("favourite") => "u.favourite"
+        );
         let q = transform("{favourite.tag = \"cats\"}[10d]", Some(columns));
         assert_eq!(
             q.unwrap(),
@@ -249,10 +286,10 @@ mod tests {
     #[test]
     #[should_panic]
     fn range_expr_without_range_column_to_query() {
-        let mut columns = HashMap::new();
-        columns.insert(Column::Filter("favourite"), "u.favourite");
-
-        let q = transform("{favourite.tag = \"cats\"}[10d]", Some(columns));
+        let q = transform(
+            "{favourite.tag = \"cats\"}[10d]",
+            Some(columns!(Column::Filter("favourite") => "u.favourite")),
+        );
         assert!(q.is_ok());
     }
 }
