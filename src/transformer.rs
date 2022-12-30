@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error};
 
 use crate::{
     lexer::tokenize,
-    parser::{parse_expression, Operator, Value, Scalar},
+    parser::{parse_expression, Operator, Scalar, Value},
 };
 
 #[derive(Debug, PartialEq)]
@@ -121,7 +121,7 @@ fn value_to_condition_rhs(op: &Operator, op_negative: bool, value: &Value) -> St
 #[cfg(test)]
 mod tests {
     use crate::{
-        parser::{Array, Scalar, Value},
+        parser::{Array, Scalar},
         transformer::{Column, Query},
     };
 
@@ -161,11 +161,11 @@ mod tests {
 
     #[test]
     fn query_operator() {
-        let scalar_int = Value::from(Scalar::Integer(1));
-        let scalar_str = Value::from(Scalar::String(String::from("foo")));
-        let array = Value::from(Array {
+        let scalar_int = Scalar::Integer(1).into();
+        let scalar_str = Scalar::String(String::from("foo")).into();
+        let array = Array {
             values: vec![Scalar::Integer(2)],
-        });
+        }.into();
 
         assert_eq!(
             op_to_condition_operator(&crate::parser::Operator::Equal, false, &scalar_int),
@@ -224,7 +224,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->>'focal_length'=? AND 1=1".to_string(),
-                params: vec![Value::from(Scalar::Integer(32))]
+                params: vec![Scalar::Integer(32).into()]
             }
         );
     }
@@ -236,7 +236,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->'focal'->>'length'=? AND 1=1".to_string(),
-                params: vec![Value::from(Scalar::Float(18.5))]
+                params: vec![Scalar::Float(18.5).into()]
             }
         );
     }
@@ -248,7 +248,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->>'description' NOT LIKE ? AND 1=1".to_string(),
-                params: vec![Value::from(Scalar::String("%dog%".to_string()))]
+                params: vec![Scalar::String("%dog%".to_string()).into()]
             }
         );
     }
@@ -260,7 +260,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->>'description'=? AND 1=1".to_string(),
-                params: vec![Value::from(Scalar::String("dog".to_string()))]
+                params: vec![Scalar::String("dog".to_string()).into()]
             }
         );
     }
@@ -273,8 +273,8 @@ mod tests {
             Query {
                 stmt: "favourite->>'tag' LIKE ? AND meta->'focal'->>'length'=? AND 1=1".to_string(),
                 params: vec![
-                    Value::from(Scalar::String("%cats%".to_string())),
-                    Value::from(Scalar::Float(18.5))
+                    Scalar::String("%cats%".to_string()).into(),
+                    Scalar::Float(18.5).into()
                 ]
             }
         );
@@ -290,7 +290,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "u.favourite->>'tag'=? AND 1=1".to_string(),
-                params: vec![Value::from(Scalar::String("cats".to_string()))]
+                params: vec![Scalar::String("cats".to_string()).into()]
             }
         );
     }
@@ -302,12 +302,12 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "favourite->>'tag'=ANY(?) AND 1=1".to_string(),
-                params: vec![Value::from(Array {
+                params: vec![Array {
                     values: vec![
                         Scalar::String("cat".to_string()),
                         Scalar::String("dog".to_string())
                     ]
-                })]
+                }.into()]
             }
         );
     }
@@ -319,12 +319,12 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "favourite->>'tag'!=ALL(?) AND 1=1".to_string(),
-                params: vec![Value::from(Array {
+                params: vec![Array {
                     values: vec![
                         Scalar::String("cat".to_string()),
                         Scalar::String("dog".to_string())
                     ]
-                })]
+                }.into()]
             }
         );
     }
@@ -336,12 +336,12 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "favourite->>'tags'=? AND 1=1".to_string(),
-                params: vec![Value::from(Array {
+                params: vec![Array {
                     values: vec![
                         Scalar::String("cat".to_string()),
                         Scalar::String("dog".to_string())
                     ]
-                })]
+                }.into()]
             }
         );
     }
@@ -358,7 +358,7 @@ mod tests {
             Query {
                 stmt: "u.favourite->>'tag'=? AND created_at >= now() - INTERVAL '10 days'"
                     .to_string(),
-                params: vec![Value::from(Scalar::String("cats".to_string()))]
+                params: vec![Scalar::String("cats".to_string()).into()]
             }
         );
     }
