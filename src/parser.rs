@@ -232,6 +232,10 @@ fn match_token<'a>(
     None
 }
 
+/// A top-level parsing function returning expression consisting of vector
+/// of `Filter`s and option `Range`.
+///
+/// Returns a `ParseError` in case of parsing problems.
 pub fn parse_expression<'a>(tokens: &'a [Token]) -> Result<Expr<'a>, ParseError> {
     if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::CurlyOpen)) {
         let (filters, tokens) = parse_filters(tokens)?;
