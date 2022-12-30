@@ -128,7 +128,7 @@ mod tests {
     use super::{op_to_condition_operator, path_to_condition_lhs, transform};
 
     #[test]
-    fn json_query_compose() {
+    fn json_query_path() {
         assert_eq!(path_to_condition_lhs(vec!["matata"], None), "matata");
         assert_eq!(
             path_to_condition_lhs(vec!["kuna", "matata"], None),
@@ -141,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    fn json_query_compose_with_aliases() {
+    fn json_query_path_with_aliases() {
         let columns = columns!(
             Column::Filter("matata") => "ma.tata",
             Column::Filter("makuna") => "ma.kuna"
