@@ -53,7 +53,7 @@ pub fn transform<I: AsRef<str>>(
             op_to_condition_operator(&filter.op, filter.op_negative, &filter.value).as_str(),
         );
         f_stmt.push_str(
-            value_to_condition_placeholder(&filter.op, filter.op_negative, &filter.value).as_str(),
+            value_to_condition_rhs(&filter.op, filter.op_negative, &filter.value).as_str(),
         );
 
         f_params.push(filter.value.to_query_parameter(&filter.op));
@@ -105,7 +105,7 @@ fn path_to_condition_lhs(path: Vec<&str>, alias: Option<&Alias>) -> String {
     output
 }
 
-fn value_to_condition_placeholder(op: &Operator, op_negative: bool, value: &Value) -> String {
+fn value_to_condition_rhs(op: &Operator, op_negative: bool, value: &Value) -> String {
     match value {
         Value::Array(_) if *op == Operator::Contains => {
             if op_negative {
@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[test]
-    fn simple_filter_to_condition() {
+    fn simple_filter() {
         let q = transform("{meta.focal_length=32}", None);
         assert_eq!(
             q.unwrap(),
@@ -230,7 +230,7 @@ mod tests {
     }
 
     #[test]
-    fn nested_filter_to_condition() {
+    fn nested_filter() {
         let q = transform("{meta.focal.length=18.5}", None);
         assert_eq!(
             q.unwrap(),
@@ -242,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn pattern_string_filter_to_condition() {
+    fn pattern_string_filter() {
         let q = transform("{meta.description !~ \"dog\"}", None);
         assert_eq!(
             q.unwrap(),
@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn exact_string_filter_to_condition() {
+    fn exact_string_filter() {
         let q = transform("{meta.description = \"dog\"}", None);
         assert_eq!(
             q.unwrap(),
@@ -266,7 +266,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_filter_expr_to_query() {
+    fn multiple_filter_expr() {
         let q = transform("{favourite.tag ~ \"cats\", meta.focal.length=18.5}", None);
         assert_eq!(
             q.unwrap(),
@@ -281,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn aliased_filter_expr_to_query() {
+    fn aliased_filter_expr() {
         let q = transform(
             "{favourite.tag = \"cats\"}",
             Some(columns!(Column::Filter("favourite") => "u.favourite")),
@@ -296,7 +296,7 @@ mod tests {
     }
 
     #[test]
-    fn array_filter_contains_value_to_query() {
+    fn array_filter_contains_value() {
         let q = transform("{favourite.tag ~ [\"cat\", \"dog\"]}", None);
         assert_eq!(
             q.unwrap(),
@@ -313,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn array_filter_not_contains_value_to_query() {
+    fn array_filter_not_contains_value() {
         let q = transform("{favourite.tag !~ [\"cat\", \"dog\"]}", None);
         assert_eq!(
             q.unwrap(),
@@ -330,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn array_filter_equal_value_to_query() {
+    fn array_filter_equal_value() {
         let q = transform("{favourite.tags = [\"cat\", \"dog\"]}", None);
         assert_eq!(
             q.unwrap(),
@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn range_expr_to_query() {
+    fn range_expr() {
         let columns = columns!(
             Column::Range => "created_at",
             Column::Filter("favourite") => "u.favourite"
@@ -365,14 +365,14 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn range_expr_without_columns_to_query() {
+    fn range_expr_without_columns() {
         let q = transform("{favourite.tag = \"cats\"}[10d]", None);
         assert!(q.is_ok());
     }
 
     #[test]
     #[should_panic]
-    fn range_expr_without_range_column_to_query() {
+    fn range_expr_without_range_column() {
         let q = transform(
             "{favourite.tag = \"cats\"}[10d]",
             Some(columns!(Column::Filter("favourite") => "u.favourite")),
