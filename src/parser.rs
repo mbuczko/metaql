@@ -95,19 +95,19 @@ pub enum ParseError {
     MalformedExpression,
     #[error("malformed filter")]
     MalformedFilter(ErrorOffset),
-    #[error("malformed range")]
-    InvalidRange(ErrorOffset),
-    #[error("range value (integer) expected")]
-    InvalidRangeValue(ErrorOffset),
-    #[error("invalid scalar value (is value a valid scalar type?)")]
+    #[error("invalid scalar value (one of: integer, float, bool, string expected)")]
     InvalidScalarValue(ErrorOffset),
-    #[error("invalid array value (are scalars comma-separated?)")]
+    #[error("invalid array value (comma-separated scalars expected)")]
     InvalidArrayValue(ErrorOffset),
-    #[error("invalid value type")]
+    #[error("invalid value type (scalar values expected)")]
     InvalidFilterValueType(ErrorOffset),
-    #[error("invalid filter operator")]
+    #[error("invalid filter operator (one of: =, !=, ~, ~= expected)")]
     InvalidFilterOperator(ErrorOffset),
-    #[error("invalid range unit")]
+    #[error("invalid range (range in square brackets expected)")]
+    InvalidRange(ErrorOffset),
+    #[error("invalid range value (integer expected)")]
+    InvalidRangeValue(ErrorOffset),
+    #[error("invalid range unit (one of: ms, s, m, h, d, w, mo, y expected)")]
     InvalidRangeUnit,
 }
 
