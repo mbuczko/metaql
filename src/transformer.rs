@@ -117,7 +117,7 @@ fn value_to_condition_rhs(op: &Operator, op_negative: bool, value: &Value) -> St
 #[cfg(test)]
 mod tests {
     use crate::{
-        parser::{Array, Scalar},
+        parser::Scalar,
         transformer::{Column, Query},
     };
 
@@ -159,10 +159,7 @@ mod tests {
     fn query_operator() {
         let scalar_int = Scalar::Integer(1).into();
         let scalar_str = Scalar::String(String::from("foo")).into();
-        let array = Array {
-            values: vec![Scalar::Integer(2)],
-        }
-        .into();
+        let array = vec![Scalar::Integer(2)].into();
 
         assert_eq!(
             op_to_condition_operator(&crate::parser::Operator::Equal, false, &scalar_int),
@@ -299,12 +296,10 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "favourite->>'tag'=ANY(?) AND 1=1".to_string(),
-                params: vec![Array {
-                    values: vec![
-                        Scalar::String("cat".to_string()),
-                        Scalar::String("dog".to_string())
-                    ]
-                }
+                params: vec![vec![
+                    Scalar::String("cat".to_string()),
+                    Scalar::String("dog".to_string())
+                ]
                 .into()]
             }
         );
@@ -317,12 +312,10 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "favourite->>'tag'!=ALL(?) AND 1=1".to_string(),
-                params: vec![Array {
-                    values: vec![
-                        Scalar::String("cat".to_string()),
-                        Scalar::String("dog".to_string())
-                    ]
-                }
+                params: vec![vec![
+                    Scalar::String("cat".to_string()),
+                    Scalar::String("dog".to_string())
+                ]
                 .into()]
             }
         );
@@ -335,12 +328,10 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "favourite->>'tags'=? AND 1=1".to_string(),
-                params: vec![Array {
-                    values: vec![
-                        Scalar::String("cat".to_string()),
-                        Scalar::String("dog".to_string())
-                    ]
-                }
+                params: vec![vec![
+                    Scalar::String("cat".to_string()),
+                    Scalar::String("dog".to_string())
+                ]
                 .into()]
             }
         );

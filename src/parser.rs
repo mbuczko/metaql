@@ -9,7 +9,7 @@ use crate::lexer::{Term, Token};
 /// expr     ->  query range?
 /// query    ->  CURLY_OPEN filter (COMMA filter)* CURLY_CLOSE
 /// filter   ->  PATH op value
-/// op       ->  "!"? (EQ | CONTAINS)
+/// op       ->  '!'? (EQ | CONTAINS)
 /// value    ->  scalar | array
 /// scalar   ->  STRING | BOOL | numeric
 /// numeric  ->  INTEGER | FLOAT
@@ -41,12 +41,7 @@ pub enum Operator {
 #[derive(Debug, PartialEq)]
 pub enum Value {
     Scalar(Scalar),
-    Array(Array<Scalar>),
-}
-
-#[derive(Debug, PartialEq)]
-pub struct Array<T> {
-    pub values: Vec<T>,
+    Array(Vec<Scalar>),
 }
 
 #[derive(Debug, PartialEq)]
@@ -171,8 +166,8 @@ impl From<Scalar> for Value {
     }
 }
 
-impl From<Array<Scalar>> for Value {
-    fn from(value: Array<Scalar>) -> Self {
+impl From<Vec<Scalar>> for Value {
+    fn from(value: Vec<Scalar>) -> Self {
         Self::Array(value)
     }
 }
@@ -296,7 +291,7 @@ fn parse_value<'a>(tokens: &'a [Token]) -> Result<(Value, &'a [Token<'a>]), Pars
 
 fn parse_array<'a>(
     tokens: &'a [Token],
-) -> Result<(Option<Array<Scalar>>, &'a [Token<'a>]), ParseError> {
+) -> Result<(Option<Vec<Scalar>>, &'a [Token<'a>]), ParseError> {
     if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::SquareOpen)) {
         let mut values = Vec::new();
         let mut tokens_slice = tokens;
@@ -315,7 +310,7 @@ fn parse_array<'a>(
         let (_, tokens) = match_token(tokens_slice, Matcher::Exact(Term::SquareClose))
             .ok_or_else(|| ParseError::InvalidArrayValue(ErrorOffset(tokens_slice[0].1)))?;
 
-        return Ok((Some(Array { values }), tokens));
+        return Ok((Some(values), tokens));
     }
     Ok((None, tokens))
 }
@@ -485,9 +480,7 @@ mod tests {
         assert_eq!(first.path, vec!["meta", "tag"]);
         assert_eq!(
             first.value,
-            Value::from(Array {
-                values: vec![Scalar::Integer(1), Scalar::Integer(2), Scalar::Integer(3)]
-            })
+            vec![Scalar::Integer(1), Scalar::Integer(2), Scalar::Integer(3)].into()
         );
     }
 
@@ -498,7 +491,7 @@ mod tests {
 
         let first = expr.filters.pop().unwrap();
         assert_eq!(first.path, vec!["meta", "tag"]);
-        assert_eq!(first.value, Value::from(Array { values: vec![] }));
+        assert_eq!(first.value, Value::from(vec![]));
     }
 
     #[test]
@@ -552,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn default_range() {
+    fn default_range_unit() {
         let tokens = tokenize("[10]").unwrap();
         let (opt, _) = parse_range(tokens.as_slice()).unwrap();
         let range = opt.unwrap();
