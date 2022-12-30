@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error};
 
 use crate::{
     lexer::tokenize,
-    parser::{parse_expression, Operator, Value},
+    parser::{parse_expression, Operator, Value, Scalar},
 };
 
 #[derive(Debug, PartialEq)]
@@ -83,7 +83,7 @@ fn ensure_non_empty(cond: &str) -> &str {
 
 fn op_to_condition_operator(op: &Operator, negative: bool, value: &Value) -> String {
     match (op, value) {
-        (Operator::Contains, Value::Scalar(_)) => {
+        (Operator::Contains, Value::Scalar(Scalar::String(_))) => {
             String::from(if negative { " NOT LIKE " } else { " LIKE " })
         }
         _ => String::from(if negative { "!=" } else { "=" }),
