@@ -178,7 +178,7 @@ impl From<Array<Scalar>> for Value {
 }
 
 impl Value {
-    pub fn to_query_parameter(self, op: &Operator) -> Self {
+    pub fn patternize(self, op: &Operator) -> Self {
         match self {
             Self::Scalar(Scalar::String(s)) if *op == Operator::Contains => {
                 Self::Scalar(Scalar::String(format!("%{s}%")))

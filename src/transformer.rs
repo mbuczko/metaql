@@ -56,7 +56,7 @@ pub fn transform<I: AsRef<str>>(
             value_to_condition_rhs(&filter.op, filter.op_negative, &filter.value).as_str(),
         );
 
-        f_prms.push(filter.value.to_query_parameter(&filter.op));
+        f_prms.push(filter.value.patternize(&filter.op));
     }
     if let Some(range) = expr.range {
         let columns = columns.expect("Range query condition requires column definition");
