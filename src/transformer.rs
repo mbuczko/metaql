@@ -36,9 +36,9 @@ pub fn transform<I: AsRef<str>>(
     let tokens = tokenize(input.as_ref())?;
     let expr = parse_expression(tokens.as_slice())?;
 
-    let mut f_stmt = String::new();
     let mut r_stmt = String::new();
-    let mut f_params = Vec::with_capacity(5);
+    let mut f_stmt = String::new();
+    let mut f_prms = Vec::with_capacity(5);
 
     for filter in expr.filters {
         let column = columns
@@ -56,7 +56,7 @@ pub fn transform<I: AsRef<str>>(
             value_to_condition_rhs(&filter.op, filter.op_negative, &filter.value).as_str(),
         );
 
-        f_params.push(filter.value.to_query_parameter(&filter.op));
+        f_prms.push(filter.value.to_query_parameter(&filter.op));
     }
     if let Some(range) = expr.range {
         let columns = columns.expect("Range query condition requires column definition");
@@ -70,7 +70,7 @@ pub fn transform<I: AsRef<str>>(
     }
     Ok(Query {
         stmt: [ensure_non_empty(&f_stmt), ensure_non_empty(&r_stmt)].join(" AND "),
-        params: f_params,
+        params: f_prms,
     })
 }
 
@@ -108,11 +108,7 @@ fn path_to_condition_lhs(path: Vec<&str>, alias: Option<&Alias>) -> String {
 fn value_to_condition_rhs(op: &Operator, op_negative: bool, value: &Value) -> String {
     match value {
         Value::Array(_) if *op == Operator::Contains => {
-            if op_negative {
-                String::from("ALL(?)")
-            } else {
-                String::from("ANY(?)")
-            }
+            String::from(if op_negative { "ALL(?)" } else { "ANY(?)" })
         }
         _ => String::from("?"),
     }
