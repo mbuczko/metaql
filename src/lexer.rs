@@ -246,6 +246,7 @@ mod tests {
             ]
         );
     }
+
     #[test]
     fn integer() {
         let result = tokenize("{focal-length: 32}").unwrap();
@@ -260,6 +261,7 @@ mod tests {
             ]
         );
     }
+
     #[test]
     fn float() {
         let result = tokenize("{width: 32.122}").unwrap();
@@ -299,6 +301,7 @@ mod tests {
             ]
         );
     }
+
     #[test]
     fn negative() {
         let result = tokenize("-10 -3.12").unwrap();
@@ -310,6 +313,7 @@ mod tests {
             ]
         )
     }
+
     #[test]
     fn invalid_negative() {
         let result = tokenize("-\"negative\"").unwrap_err();
@@ -318,6 +322,7 @@ mod tests {
         let result = tokenize("-true").unwrap_err();
         assert_eq!(result, TokenizeError::MalformedNumeric(0));
     }
+
     #[test]
     fn booleans() {
         let result = tokenize("true flase false").unwrap();

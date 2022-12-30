@@ -161,7 +161,8 @@ mod tests {
         let scalar_str = Scalar::String(String::from("foo")).into();
         let array = Array {
             values: vec![Scalar::Integer(2)],
-        }.into();
+        }
+        .into();
 
         assert_eq!(
             op_to_condition_operator(&crate::parser::Operator::Equal, false, &scalar_int),
@@ -303,7 +304,8 @@ mod tests {
                         Scalar::String("cat".to_string()),
                         Scalar::String("dog".to_string())
                     ]
-                }.into()]
+                }
+                .into()]
             }
         );
     }
@@ -320,7 +322,8 @@ mod tests {
                         Scalar::String("cat".to_string()),
                         Scalar::String("dog".to_string())
                     ]
-                }.into()]
+                }
+                .into()]
             }
         );
     }
@@ -337,7 +340,8 @@ mod tests {
                         Scalar::String("cat".to_string()),
                         Scalar::String("dog".to_string())
                     ]
-                }.into()]
+                }
+                .into()]
             }
         );
     }
