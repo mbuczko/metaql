@@ -38,11 +38,9 @@ pub fn transform<I: AsRef<str>>(
 
     let mut f_stmt = String::new();
     let mut r_stmt = String::new();
-    let mut params = Vec::with_capacity(5);
+    let mut f_params = Vec::with_capacity(5);
 
     for filter in expr.filters {
-        params.push(filter.value.patternize(&filter.op));
-
         let column = columns
             .as_ref()
             .map(|c| c.get(&Column::Filter(filter.path.first().unwrap())))
@@ -51,8 +49,14 @@ pub fn transform<I: AsRef<str>>(
             f_stmt.push_str(" AND ");
         }
         f_stmt.push_str(path_to_condition_lhs(filter.path, column).as_str());
-        f_stmt.push_str(op_to_condition_operator(filter.op, filter.op_negative).as_str());
-        f_stmt.push('?');
+        f_stmt.push_str(
+            op_to_condition_operator(&filter.op, filter.op_negative, &filter.value).as_str(),
+        );
+        f_stmt.push_str(
+            value_to_condition_placeholder(&filter.op, filter.op_negative, &filter.value).as_str(),
+        );
+
+        f_params.push(filter.value.to_query_parameter(&filter.op));
     }
     if let Some(range) = expr.range {
         let columns = columns.expect("Range query condition requires column definition");
@@ -66,7 +70,7 @@ pub fn transform<I: AsRef<str>>(
     }
     Ok(Query {
         stmt: [ensure_non_empty(&f_stmt), ensure_non_empty(&r_stmt)].join(" AND "),
-        params,
+        params: f_params,
     })
 }
 
@@ -77,10 +81,12 @@ fn ensure_non_empty(cond: &str) -> &str {
     cond
 }
 
-fn op_to_condition_operator(op: Operator, negative: bool) -> String {
-    match op {
-        Operator::Equal => String::from(if negative { "!=" } else { "=" }),
-        Operator::Contains => String::from(if negative { " NOT LIKE " } else { " LIKE " }),
+fn op_to_condition_operator(op: &Operator, negative: bool, value: &Value) -> String {
+    match (op, value) {
+        (Operator::Contains, Value::Scalar(_)) => {
+            String::from(if negative { " NOT LIKE " } else { " LIKE " })
+        }
+        _ => String::from(if negative { "!=" } else { "=" }),
     }
 }
 
@@ -99,10 +105,23 @@ fn path_to_condition_lhs(path: Vec<&str>, alias: Option<&Alias>) -> String {
     output
 }
 
+fn value_to_condition_placeholder(op: &Operator, op_negative: bool, value: &Value) -> String {
+    match value {
+        Value::Array(_) if *op == Operator::Contains => {
+            if op_negative {
+                String::from("ALL(?)")
+            } else {
+                String::from("ANY(?)")
+            }
+        }
+        _ => String::from("?"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
-        parser::{Scalar, Value},
+        parser::{Array, Scalar, Value},
         transformer::{Column, Query},
     };
 
@@ -142,21 +161,35 @@ mod tests {
 
     #[test]
     fn query_operator() {
+        let scalar_int = Value::from(Scalar::Integer(1));
+        let scalar_str = Value::from(Scalar::String(String::from("foo")));
+        let array = Value::from(Array {
+            values: vec![Scalar::Integer(2)],
+        });
+
         assert_eq!(
-            op_to_condition_operator(crate::parser::Operator::Equal, false),
+            op_to_condition_operator(&crate::parser::Operator::Equal, false, &scalar_int),
             "="
         );
         assert_eq!(
-            op_to_condition_operator(crate::parser::Operator::Equal, true),
+            op_to_condition_operator(&crate::parser::Operator::Equal, true, &scalar_int),
             "!="
         );
         assert_eq!(
-            op_to_condition_operator(crate::parser::Operator::Contains, false),
+            op_to_condition_operator(&crate::parser::Operator::Contains, false, &scalar_str),
             " LIKE "
         );
         assert_eq!(
-            op_to_condition_operator(crate::parser::Operator::Contains, true),
+            op_to_condition_operator(&crate::parser::Operator::Contains, true, &scalar_str),
             " NOT LIKE "
+        );
+        assert_eq!(
+            op_to_condition_operator(&crate::parser::Operator::Contains, false, &array),
+            "="
+        );
+        assert_eq!(
+            op_to_condition_operator(&crate::parser::Operator::Contains, true, &array),
+            "!="
         );
     }
 
@@ -258,6 +291,57 @@ mod tests {
             Query {
                 stmt: "u.favourite->>'tag'=? AND 1=1".to_string(),
                 params: vec![Value::from(Scalar::String("cats".to_string()))]
+            }
+        );
+    }
+
+    #[test]
+    fn array_filter_contains_value_to_query() {
+        let q = transform("{favourite.tag ~ [\"cat\", \"dog\"]}", None);
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "favourite->>'tag'=ANY(?) AND 1=1".to_string(),
+                params: vec![Value::from(Array {
+                    values: vec![
+                        Scalar::String("cat".to_string()),
+                        Scalar::String("dog".to_string())
+                    ]
+                })]
+            }
+        );
+    }
+
+    #[test]
+    fn array_filter_not_contains_value_to_query() {
+        let q = transform("{favourite.tag !~ [\"cat\", \"dog\"]}", None);
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "favourite->>'tag'!=ALL(?) AND 1=1".to_string(),
+                params: vec![Value::from(Array {
+                    values: vec![
+                        Scalar::String("cat".to_string()),
+                        Scalar::String("dog".to_string())
+                    ]
+                })]
+            }
+        );
+    }
+
+    #[test]
+    fn array_filter_equal_value_to_query() {
+        let q = transform("{favourite.tags = [\"cat\", \"dog\"]}", None);
+        assert_eq!(
+            q.unwrap(),
+            Query {
+                stmt: "favourite->>'tags'=? AND 1=1".to_string(),
+                params: vec![Value::from(Array {
+                    values: vec![
+                        Scalar::String("cat".to_string()),
+                        Scalar::String("dog".to_string())
+                    ]
+                })]
             }
         );
     }

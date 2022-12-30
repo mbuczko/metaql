@@ -46,7 +46,7 @@ pub enum Value {
 
 #[derive(Debug, PartialEq)]
 pub struct Array<T> {
-    values: Vec<T>,
+    pub values: Vec<T>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -178,7 +178,7 @@ impl From<Array<Scalar>> for Value {
 }
 
 impl Value {
-    pub fn patternize(self, op: &Operator) -> Self {
+    pub fn to_query_parameter(self, op: &Operator) -> Self {
         match self {
             Self::Scalar(Scalar::String(s)) if *op == Operator::Contains => {
                 Self::Scalar(Scalar::String(format!("%{s}%")))
