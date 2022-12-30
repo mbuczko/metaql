@@ -102,7 +102,7 @@ fn path_to_condition_lhs(path: Vec<&str>, alias: Option<&Alias>) -> String {
 #[cfg(test)]
 mod tests {
     use crate::{
-        parser::Value,
+        parser::{Scalar, Value},
         transformer::{Column, Query},
     };
 
@@ -191,7 +191,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->>'focal_length'=? AND 1=1".to_string(),
-                params: vec![Value::Integer(32)]
+                params: vec![Value::from(Scalar::Integer(32))]
             }
         );
     }
@@ -203,7 +203,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->'focal'->>'length'=? AND 1=1".to_string(),
-                params: vec![Value::Float(18.5)]
+                params: vec![Value::from(Scalar::Float(18.5))]
             }
         );
     }
@@ -215,7 +215,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->>'description' NOT LIKE ? AND 1=1".to_string(),
-                params: vec![Value::String("%dog%".to_string())]
+                params: vec![Value::from(Scalar::String("%dog%".to_string()))]
             }
         );
     }
@@ -227,7 +227,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "meta->>'description'=? AND 1=1".to_string(),
-                params: vec![Value::String("dog".to_string())]
+                params: vec![Value::from(Scalar::String("dog".to_string()))]
             }
         );
     }
@@ -239,7 +239,10 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "favourite->>'tag' LIKE ? AND meta->'focal'->>'length'=? AND 1=1".to_string(),
-                params: vec![Value::String("%cats%".to_string()), Value::Float(18.5)]
+                params: vec![
+                    Value::from(Scalar::String("%cats%".to_string())),
+                    Value::from(Scalar::Float(18.5))
+                ]
             }
         );
     }
@@ -254,7 +257,7 @@ mod tests {
             q.unwrap(),
             Query {
                 stmt: "u.favourite->>'tag'=? AND 1=1".to_string(),
-                params: vec![Value::String("cats".to_string())]
+                params: vec![Value::from(Scalar::String("cats".to_string()))]
             }
         );
     }
@@ -271,7 +274,7 @@ mod tests {
             Query {
                 stmt: "u.favourite->>'tag'=? AND created_at >= now() - INTERVAL '10 days'"
                     .to_string(),
-                params: vec![Value::String("cats".to_string())]
+                params: vec![Value::from(Scalar::String("cats".to_string()))]
             }
         );
     }
