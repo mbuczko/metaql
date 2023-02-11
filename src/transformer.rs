@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_filter_expr() {
+    fn multiple_filter_query() {
         let q = transform("{favourite.tag ~ \"cats\", meta.focal.length=18.5}", None);
         assert_eq!(
             q.unwrap(),
@@ -290,7 +290,7 @@ mod tests {
     }
 
     #[test]
-    fn aliased_filter_expr() {
+    fn aliased_filter_query() {
         let q = transform(
             "{favourite.tag = \"cats\"}",
             Some(columns!(Column::Filter("favourite") => "u.favourite")),
@@ -305,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn multi_filter_expr() {
+    fn multi_filter_query() {
         let q = transform(
             "{favourite.tag = \"cats\", folder = \"pets\"} | {offset = 1, version = 2}",
             Some(columns!(Column::Filter("favourite") => "u.favourite")),
@@ -324,7 +324,7 @@ mod tests {
         );
     }
     #[test]
-    fn multi_filter_empty_expr() {
+    fn multi_filter_empty_query() {
         let q = transform(
             "{favourite.tag = \"cats\", folder = \"pets\"} | {}",
             Some(columns!(Column::Filter("favourite") => "u.favourite")),
@@ -390,7 +390,7 @@ mod tests {
     }
 
     #[test]
-    fn range_expr() {
+    fn range_query() {
         let columns = columns!(
             Column::Range => "created_at",
             Column::Filter("favourite") => "u.favourite"
@@ -408,14 +408,14 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn range_expr_without_columns() {
+    fn range_query_without_columns() {
         let q = transform("{favourite.tag = \"cats\"}[10d]", None);
         assert!(q.is_ok());
     }
 
     #[test]
     #[should_panic]
-    fn range_expr_without_range_column() {
+    fn range_query_without_range_column() {
         let q = transform(
             "{favourite.tag = \"cats\"}[10d]",
             Some(columns!(Column::Filter("favourite") => "u.favourite")),
