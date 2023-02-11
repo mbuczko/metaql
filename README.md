@@ -4,12 +4,14 @@ The goal of this crate is to parse a simple query language, similar to one used 
 Basing grammar considered here comes down to:
 
 ``` antlr
-expr     ->  query range?
-query    ->  CURLY_OPEN filter (COMMA filter)* CURLY_CLOSE
-filter   ->  PATH op value
-op       ->  "!"? (EQ | CONTAINS)
-value    ->  STRING | BOOL | numeric
-numeric  ->  (INTEGER | FLOAT)
+query    ->  filter ('|' filter)* range?
+filter   ->  CURLY_OPEN cond (COMMA cond)* CURLY_CLOSE
+cond     ->  PATH op value
+op       ->  '!'? ( EQ | CONTAINS )
+value    ->  scalar | array
+scalar   ->  STRING | BOOL | numeric
+numeric  ->  INTEGER | FLOAT
+array    ->  SQARE_OPEN value ( COMMA value )* SQARE_CLOSE
 range    ->  SQARE_OPEN duration SQUARE_CLOSE
 duration ->  INTEGER unit
 unit     ->  "ms" | "s" | "m" | "h" | "d" | "w" | "mo" | "y"
@@ -24,25 +26,29 @@ Query, as simple as:
 gets parsed to following AST:
 
 ```
-Expr { 
+Query {
   filters: [
-    Filter { 
-      path: ["name"],
-      value: String("lisa"),
-      op: Contains,
-      op_negative: false
-    },
     Filter {
-      path: ["meta", "tags"],
-      value: String("vacation"),
-      op: Contains,
-      op_negative: false
-    },
-    Filter {
-      path: ["meta", "focal_length"],
-      value: Float(18.5),
-      op: Equal,
-      op_negative: false
+      conds: [
+        Cond {
+          path: ["name"],
+          value: String("lisa"),
+          op: Contains,
+          op_negative: false
+        },
+        Cond {
+          path: ["meta", "tags"],
+          value: String("vacation"),
+          op: Contains,
+          op_negative: false
+        },
+        Cond {
+          path: ["meta", "focal_length"],
+          value: Float(18.5),
+          op: Equal,
+          op_negative: false
+        }
+      ]
     }
   ],
   range: Some(Range(10, Days))

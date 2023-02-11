@@ -6,7 +6,7 @@ use crate::lexer::{Term, Token};
 
 /// Parser rules:
 ///
-/// query    ->  filter ('|' filter)* ? range?
+/// query    ->  filter ('|' filter)* range?
 /// filter   ->  CURLY_OPEN cond (COMMA cond)* CURLY_CLOSE
 /// cond     ->  PATH op value
 /// op       ->  '!'? ( EQ | CONTAINS )
