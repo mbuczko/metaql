@@ -275,7 +275,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_filter_query() {
+    fn multi_cond_filter_query() {
         let q = transform("{favourite.tag ~ \"cats\", meta.focal.length=18.5}", None);
         assert_eq!(
             q.unwrap(),
@@ -323,8 +323,30 @@ mod tests {
             }
         );
     }
+
     #[test]
-    fn multi_filter_empty_query() {
+    fn multi_filter_query_with_range() {
+        let q = transform(
+            "{favourite.tag ~ \"cats\"} | {meta.focal.length=18.5}[10d]",
+            Some(columns!(
+                Column::Range => "created_at"
+            )),
+        );
+
+        assert_eq!(
+            q.unwrap(),
+            Statement {
+                query: "(favourite->>'tag' LIKE ? OR meta->'focal'->>'length'=?) AND created_at >= now() - INTERVAL '10 days'".to_string(),
+                params: vec![
+                    Scalar::String("%cats%".to_string()).into(),
+                    Scalar::Float(18.5).into()
+                ]
+            }
+        );
+    }
+
+    #[test]
+    fn multi_filter_query_with_empty_filter() {
         let q = transform(
             "{favourite.tag = \"cats\", folder = \"pets\"} | {}",
             Some(columns!(Column::Filter("favourite") => "u.favourite")),
