@@ -6,7 +6,7 @@ use crate::lexer::{Term, Token};
 
 /// Parser rules:
 ///
-/// query    ->  ( filter ('|' filter)* )? range?
+/// query    ->  filter ('|' filter)* ? range?
 /// filter   ->  CURLY_OPEN cond (COMMA cond)* CURLY_CLOSE
 /// cond     ->  PATH op value
 /// op       ->  '!'? ( EQ | CONTAINS )
@@ -247,13 +247,18 @@ pub fn parse_query<'a>(tokens: &'a [Token]) -> Result<Query<'a>, ParseError> {
         if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::Or)) {
             tokens_slice = tokens;
         } else {
-            tokens_slice = tokens;
-            break;
+            let (range, _) = parse_range(tokens)?;
+
+            // if there are still tokens to digest and it's not `Range`
+            // coming next then clearly something is wrong.
+            return if !tokens.is_empty() && range.is_none() {
+                Err(ParseError::MalformedQuery)
+            } else {
+                Ok(Query { filters, range })
+            }
         }
     }
-
-    let (range, _) = parse_range(tokens_slice)?;
-    Ok(Query { filters, range })
+    Err(ParseError::MalformedQuery)
 }
 
 pub fn parse_filter<'a>(
@@ -263,14 +268,16 @@ pub fn parse_filter<'a>(
         let (conds, tokens) = parse_conds(tokens)?;
 
         // curly closing brace = end of filters
-        if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::CurlyClose)) {
-            return Ok((Some(Filter { conds }), tokens));
-        }
-        // something's wrong with filter definition (like invalid path)
-        return Err(ParseError::MalformedFilter(ErrorOffset(tokens[0].2)));
+        return if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::CurlyClose)) {
+            Ok((Some(Filter { conds }), tokens))
+        } else {
+            Err(ParseError::MalformedFilter(ErrorOffset(tokens[0].2)))
+        };
     }
     // entire filter starts with wrong token
-    Err(ParseError::MalformedQuery)
+    Err(ParseError::MalformedFilter(ErrorOffset(
+        tokens.first().map(|t| t.1).unwrap_or(0),
+    )))
 }
 
 fn parse_conds<'a>(tokens: &'a [Token]) -> Result<(Vec<Cond<'a>>, &'a [Token<'a>]), ParseError> {
@@ -368,7 +375,7 @@ mod tests {
         let tokens = tokenize("< meta.tag != \"boo\">").unwrap();
         let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(query, ParseError::MalformedQuery);
+        assert_eq!(query, ParseError::MalformedFilter(ErrorOffset(0)));
     }
 
     #[test]
@@ -376,7 +383,7 @@ mod tests {
         let tokens = tokenize("").unwrap();
         let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(query, ParseError::MalformedQuery);
+        assert_eq!(query, ParseError::MalformedFilter(ErrorOffset(0)));
     }
 
     #[test]
@@ -472,20 +479,15 @@ mod tests {
         let filter_1 = &filters[0];
         let cond_1 = &filter_1.conds[0];
         assert_eq!(cond_1.path[0], "tag");
-        assert_eq!(cond_1.value, Value::from(Scalar::String("favourite".to_string())));
+        assert_eq!(
+            cond_1.value,
+            Value::from(Scalar::String("favourite".to_string()))
+        );
 
         let filter_2 = &filters[1];
         let cond_2 = &filter_2.conds[0];
         assert_eq!(cond_2.path[0], "focal_length");
         assert_eq!(cond_2.value, Value::from(Scalar::Float(3.2)));
-    }
-
-    #[test]
-    fn multiple_filters_with_wrong_operator() {
-        let tokens = tokenize("{ tag != \"favourite\" } & { focal_length=3.2 }").unwrap();
-        let query = parse_query(tokens.as_slice()).unwrap();
-
-        assert_eq!(query.filters.len(), 1);
     }
 
     #[test]
@@ -585,6 +587,14 @@ mod tests {
         let query = parse_query(tokens.as_slice()).unwrap_err();
 
         assert_eq!(query, ParseError::MalformedFilter(ErrorOffset(21)));
+    }
+
+    #[test]
+    fn multiple_filters_with_wrong_operator() {
+        let tokens = tokenize("{ tag != \"favourite\" } & { focal_length=3.2 }").unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
+
+        assert_eq!(query, ParseError::MalformedQuery);
     }
 
     #[test]
