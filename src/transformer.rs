@@ -6,8 +6,8 @@ use crate::{
 };
 
 #[derive(Debug, PartialEq)]
-pub struct Query {
-    pub stmt: String,
+pub struct Statement {
+    pub query: String,
     pub params: Vec<Value>,
 }
 
@@ -29,58 +29,72 @@ macro_rules! columns {
     }}
 }
 
+impl Statement {
+    fn new(filters: String, range: String, params: Vec<Value>) -> Self {
+        let mut stmt = Vec::with_capacity(2);
+
+        if !filters.is_empty() {
+            stmt.push(format!("({filters})"));
+        }
+        if !range.is_empty() {
+            stmt.push(range);
+        }
+        Self {
+            query: stmt.join(" AND "),
+            params,
+        }
+    }
+}
+
 pub fn transform<I: AsRef<str>>(
     input: I,
     columns: Option<Columns>,
-) -> Result<Query, Box<dyn Error>> {
+) -> Result<Statement, Box<dyn Error>> {
     let tokens = tokenize(input.as_ref())?;
     let query = parse_query(tokens.as_slice())?;
 
-    let mut r_stmt = String::new();
-    let mut f_stmt = String::new();
-    let mut f_prms = Vec::with_capacity(5);
+    let mut range_fragment = String::new();
+    let mut filters_fragments = Vec::with_capacity(3);
+    let mut filters_params = Vec::with_capacity(5);
 
     for filter in query.filters {
+        let mut filter_fragment = String::new();
         for cond in filter.conds {
             let column = columns
                 .as_ref()
                 .map(|c| c.get(&Column::Filter(cond.path.first().unwrap())))
                 .unwrap_or(None);
-            if !f_stmt.is_empty() {
-                f_stmt.push_str(" AND ");
+            if !filter_fragment.is_empty() {
+                filter_fragment.push_str(" AND ");
             }
-            f_stmt.push_str(path_to_condition_lhs(cond.path, column).as_str());
-            f_stmt.push_str(
+            filter_fragment.push_str(path_to_condition_lhs(cond.path, column).as_str());
+            filter_fragment.push_str(
                 op_to_condition_operator(&cond.op, cond.op_negative, &cond.value).as_str(),
             );
-            f_stmt.push_str(
-                value_to_condition_rhs(&cond.op, cond.op_negative, &cond.value).as_str(),
-            );
+            filter_fragment
+                .push_str(value_to_condition_rhs(&cond.op, cond.op_negative, &cond.value).as_str());
 
-            f_prms.push(cond.value.patternize(&cond.op));
+            filters_params.push(cond.value.patternize(&cond.op));
+        }
+        if !filter_fragment.is_empty() {
+            filters_fragments.push(filter_fragment);
         }
     }
     if let Some(range) = query.range {
         let columns = columns.expect("Range query condition requires column definition");
         let range_column = columns.get(&Column::Range).unwrap();
 
-        r_stmt = format!(
+        range_fragment = format!(
             "{} >= now() - INTERVAL '{}'",
             range_column,
             range.to_query_string()
         );
     }
-    Ok(Query {
-        stmt: [ensure_non_empty(&f_stmt), ensure_non_empty(&r_stmt)].join(" AND "),
-        params: f_prms,
-    })
-}
-
-fn ensure_non_empty(cond: &str) -> &str {
-    if cond.is_empty() {
-        return "1=1";
-    }
-    cond
+    Ok(Statement::new(
+        filters_fragments.join(" OR "),
+        range_fragment,
+        filters_params,
+    ))
 }
 
 fn op_to_condition_operator(op: &Operator, negative: bool, value: &Value) -> String {
@@ -120,7 +134,7 @@ fn value_to_condition_rhs(op: &Operator, op_negative: bool, value: &Value) -> St
 mod tests {
     use crate::{
         parser::Scalar,
-        transformer::{Column, Query},
+        transformer::{Column, Statement},
     };
 
     use super::{op_to_condition_operator, path_to_condition_lhs, transform};
@@ -193,8 +207,8 @@ mod tests {
         let q = transform("{ }", Some(columns!(Column::Range => "created_at")));
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "1=1 AND 1=1".to_string(),
+            Statement {
+                query: "".to_string(),
                 params: vec![]
             }
         );
@@ -205,8 +219,8 @@ mod tests {
         let q = transform("{ }[10ms]", Some(columns!(Column::Range => "created_at")));
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "1=1 AND created_at >= now() - INTERVAL '10 milliseconds'".to_string(),
+            Statement {
+                query: "created_at >= now() - INTERVAL '10 milliseconds'".to_string(),
                 params: vec![]
             }
         );
@@ -217,8 +231,8 @@ mod tests {
         let q = transform("{meta.focal_length=32}", None);
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "meta->>'focal_length'=? AND 1=1".to_string(),
+            Statement {
+                query: "(meta->>'focal_length'=?)".to_string(),
                 params: vec![Scalar::Integer(32).into()]
             }
         );
@@ -229,8 +243,8 @@ mod tests {
         let q = transform("{meta.focal.length=18.5}", None);
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "meta->'focal'->>'length'=? AND 1=1".to_string(),
+            Statement {
+                query: "(meta->'focal'->>'length'=?)".to_string(),
                 params: vec![Scalar::Float(18.5).into()]
             }
         );
@@ -241,8 +255,8 @@ mod tests {
         let q = transform("{meta.description !~ \"dog\"}", None);
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "meta->>'description' NOT LIKE ? AND 1=1".to_string(),
+            Statement {
+                query: "(meta->>'description' NOT LIKE ?)".to_string(),
                 params: vec![Scalar::String("%dog%".to_string()).into()]
             }
         );
@@ -253,8 +267,8 @@ mod tests {
         let q = transform("{meta.description = \"dog\"}", None);
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "meta->>'description'=? AND 1=1".to_string(),
+            Statement {
+                query: "(meta->>'description'=?)".to_string(),
                 params: vec![Scalar::String("dog".to_string()).into()]
             }
         );
@@ -265,8 +279,8 @@ mod tests {
         let q = transform("{favourite.tag ~ \"cats\", meta.focal.length=18.5}", None);
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "favourite->>'tag' LIKE ? AND meta->'focal'->>'length'=? AND 1=1".to_string(),
+            Statement {
+                query: "(favourite->>'tag' LIKE ? AND meta->'focal'->>'length'=?)".to_string(),
                 params: vec![
                     Scalar::String("%cats%".to_string()).into(),
                     Scalar::Float(18.5).into()
@@ -283,9 +297,46 @@ mod tests {
         );
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "u.favourite->>'tag'=? AND 1=1".to_string(),
+            Statement {
+                query: "(u.favourite->>'tag'=?)".to_string(),
                 params: vec![Scalar::String("cats".to_string()).into()]
+            }
+        );
+    }
+
+    #[test]
+    fn multi_filter_expr() {
+        let q = transform(
+            "{favourite.tag = \"cats\", folder = \"pets\"} | {offset = 1, version = 2}",
+            Some(columns!(Column::Filter("favourite") => "u.favourite")),
+        );
+        assert_eq!(
+            q.unwrap(),
+            Statement {
+                query: "(u.favourite->>'tag'=? AND folder=? OR offset=? AND version=?)".to_string(),
+                params: vec![
+                    Scalar::String("cats".to_string()).into(),
+                    Scalar::String("pets".to_string()).into(),
+                    Scalar::Integer(1).into(),
+                    Scalar::Integer(2).into(),
+                ]
+            }
+        );
+    }
+    #[test]
+    fn multi_filter_empty_expr() {
+        let q = transform(
+            "{favourite.tag = \"cats\", folder = \"pets\"} | {}",
+            Some(columns!(Column::Filter("favourite") => "u.favourite")),
+        );
+        assert_eq!(
+            q.unwrap(),
+            Statement {
+                query: "(u.favourite->>'tag'=? AND folder=?)".to_string(),
+                params: vec![
+                    Scalar::String("cats".to_string()).into(),
+                    Scalar::String("pets".to_string()).into(),
+                ]
             }
         );
     }
@@ -295,8 +346,8 @@ mod tests {
         let q = transform("{favourite.tag ~ [\"cat\", \"dog\"]}", None);
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "favourite->>'tag'=ANY(?) AND 1=1".to_string(),
+            Statement {
+                query: "(favourite->>'tag'=ANY(?))".to_string(),
                 params: vec![vec![
                     Scalar::String("cat".to_string()),
                     Scalar::String("dog".to_string())
@@ -311,8 +362,8 @@ mod tests {
         let q = transform("{favourite.tag !~ [\"cat\", \"dog\"]}", None);
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "favourite->>'tag'!=ALL(?) AND 1=1".to_string(),
+            Statement {
+                query: "(favourite->>'tag'!=ALL(?))".to_string(),
                 params: vec![vec![
                     Scalar::String("cat".to_string()),
                     Scalar::String("dog".to_string())
@@ -327,8 +378,8 @@ mod tests {
         let q = transform("{favourite.tags = [\"cat\", \"dog\"]}", None);
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "favourite->>'tags'=? AND 1=1".to_string(),
+            Statement {
+                query: "(favourite->>'tags'=?)".to_string(),
                 params: vec![vec![
                     Scalar::String("cat".to_string()),
                     Scalar::String("dog".to_string())
@@ -347,8 +398,8 @@ mod tests {
         let q = transform("{favourite.tag = \"cats\"}[10d]", Some(columns));
         assert_eq!(
             q.unwrap(),
-            Query {
-                stmt: "u.favourite->>'tag'=? AND created_at >= now() - INTERVAL '10 days'"
+            Statement {
+                query: "(u.favourite->>'tag'=?) AND created_at >= now() - INTERVAL '10 days'"
                     .to_string(),
                 params: vec![Scalar::String("cats".to_string()).into()]
             }
