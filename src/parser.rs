@@ -252,7 +252,7 @@ pub fn parse_query<'a>(tokens: &'a [Token]) -> Result<Query<'a>, ParseError> {
             // if there are still tokens to digest and it's not `Range`
             // coming next then clearly something is wrong.
             return if !tokens.is_empty() && range.is_none() {
-                Err(ParseError::MalformedQuery)
+                Err(ParseError::InvalidFilterOperator(ErrorOffset(tokens[0].1)))
             } else {
                 Ok(Query { filters, range })
             }
@@ -594,7 +594,7 @@ mod tests {
         let tokens = tokenize("{ tag != \"favourite\" } & { focal_length=3.2 }").unwrap();
         let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(query, ParseError::MalformedQuery);
+        assert_eq!(query, ParseError::InvalidFilterOperator(ErrorOffset(23)));
     }
 
     #[test]

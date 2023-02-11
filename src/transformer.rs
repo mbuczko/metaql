@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn multi_filter_query_with_range() {
         let q = transform(
-            "{favourite.tag ~ \"cats\"} | {meta.focal.length=18.5}[10d]",
+            "{favourite.tag ~ \"cats\"} | {meta.focal.length=18.5} [10d]",
             Some(columns!(
                 Column::Range => "created_at"
             )),
