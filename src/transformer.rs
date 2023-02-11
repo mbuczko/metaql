@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error};
 
 use crate::{
     lexer::tokenize,
-    parser::{parse_expression, Operator, Scalar, Value},
+    parser::{parse_query, Operator, Scalar, Value},
 };
 
 #[derive(Debug, PartialEq)]
@@ -34,31 +34,33 @@ pub fn transform<I: AsRef<str>>(
     columns: Option<Columns>,
 ) -> Result<Query, Box<dyn Error>> {
     let tokens = tokenize(input.as_ref())?;
-    let expr = parse_expression(tokens.as_slice())?;
+    let query = parse_query(tokens.as_slice())?;
 
     let mut r_stmt = String::new();
     let mut f_stmt = String::new();
     let mut f_prms = Vec::with_capacity(5);
 
-    for filter in expr.filters {
-        let column = columns
-            .as_ref()
-            .map(|c| c.get(&Column::Filter(filter.path.first().unwrap())))
-            .unwrap_or(None);
-        if !f_stmt.is_empty() {
-            f_stmt.push_str(" AND ");
-        }
-        f_stmt.push_str(path_to_condition_lhs(filter.path, column).as_str());
-        f_stmt.push_str(
-            op_to_condition_operator(&filter.op, filter.op_negative, &filter.value).as_str(),
-        );
-        f_stmt.push_str(
-            value_to_condition_rhs(&filter.op, filter.op_negative, &filter.value).as_str(),
-        );
+    for filter in query.filters {
+        for cond in filter.conds {
+            let column = columns
+                .as_ref()
+                .map(|c| c.get(&Column::Filter(cond.path.first().unwrap())))
+                .unwrap_or(None);
+            if !f_stmt.is_empty() {
+                f_stmt.push_str(" AND ");
+            }
+            f_stmt.push_str(path_to_condition_lhs(cond.path, column).as_str());
+            f_stmt.push_str(
+                op_to_condition_operator(&cond.op, cond.op_negative, &cond.value).as_str(),
+            );
+            f_stmt.push_str(
+                value_to_condition_rhs(&cond.op, cond.op_negative, &cond.value).as_str(),
+            );
 
-        f_prms.push(filter.value.patternize(&filter.op));
+            f_prms.push(cond.value.patternize(&cond.op));
+        }
     }
-    if let Some(range) = expr.range {
+    if let Some(range) = query.range {
         let columns = columns.expect("Range query condition requires column definition");
         let range_column = columns.get(&Column::Range).unwrap();
 
@@ -186,7 +188,6 @@ mod tests {
             "!="
         );
     }
-
     #[test]
     fn no_filter_no_range() {
         let q = transform("{ }", Some(columns!(Column::Range => "created_at")));

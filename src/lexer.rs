@@ -11,6 +11,7 @@ pub enum Term<'a> {
     SquareClose,
     Colon,
     Comma,
+    Or,
     Equal,
     Exclamation,
     Contains,
@@ -171,6 +172,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                     ))
                 }
             },
+            '|' => Token(Term::Or, pos, pos),
             '!' => Token(Term::Exclamation, pos, pos),
             ':' => Token(Term::Colon, pos, pos),
             ',' => Token(Term::Comma, pos, pos),

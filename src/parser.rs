@@ -6,26 +6,31 @@ use crate::lexer::{Term, Token};
 
 /// Parser rules:
 ///
-/// expr     ->  query range?
-/// query    ->  CURLY_OPEN filter (COMMA filter)* CURLY_CLOSE
-/// filter   ->  PATH op value
-/// op       ->  '!'? (EQ | CONTAINS)
+/// query    ->  ( filter ('|' filter)* )? range?
+/// filter   ->  CURLY_OPEN cond (COMMA cond)* CURLY_CLOSE
+/// cond     ->  PATH op value
+/// op       ->  '!'? ( EQ | CONTAINS )
 /// value    ->  scalar | array
 /// scalar   ->  STRING | BOOL | numeric
 /// numeric  ->  INTEGER | FLOAT
-/// array    ->  SQARE_OPEN value (COMMA value)* SQARE_CLOSE
+/// array    ->  SQARE_OPEN value ( COMMA value )* SQARE_CLOSE
 /// range    ->  SQARE_OPEN duration SQUARE_CLOSE
 /// duration ->  INTEGER unit
 /// unit     ->  "ms" | "s" | "m" | "h" | "d" | "w" | "mo" | "y"
 
-#[derive(Debug)]
-pub struct Expr<'a> {
+#[derive(Debug, PartialEq)]
+pub struct Query<'a> {
     pub filters: Vec<Filter<'a>>,
     pub range: Option<Range>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Filter<'a> {
+    pub conds: Vec<Cond<'a>>,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Cond<'a> {
     pub path: Vec<&'a str>, // property path split by dot
     pub value: Value,
     pub op: Operator,
@@ -86,8 +91,8 @@ pub struct ErrorOffset(usize);
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ParseError {
-    #[error("malformed expression")]
-    MalformedExpression,
+    #[error("malformed query")]
+    MalformedQuery,
     #[error("malformed filter")]
     MalformedFilter(ErrorOffset),
     #[error("invalid scalar value (one of: integer, float, bool, string expected)")]
@@ -152,10 +157,10 @@ impl<'a> TryFrom<&Token<'a>> for Scalar {
 impl Display for Scalar {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Scalar::Integer(i) => write!(f, "{}", i),
-            Scalar::Float(l) => write!(f, "{}", l),
-            Scalar::Bool(b) => write!(f, "{}", b),
-            Scalar::String(s) => write!(f, "'{}'", s),
+            Scalar::Integer(i) => write!(f, "{i}"),
+            Scalar::Float(l) => write!(f, "{l}"),
+            Scalar::Bool(b) => write!(f, "{b}"),
+            Scalar::String(s) => write!(f, "'{s}'"),
         }
     }
 }
@@ -227,30 +232,49 @@ fn match_token<'a>(
     None
 }
 
-/// A top-level parsing function returning expression consisting of vector
-/// of `Filter`s and option `Range`.
+/// A top-level parsing function returning query consisting of vector
+/// of `Filter`s and optional `Range`.
 ///
 /// Returns a `ParseError` in case of parsing problems.
-pub fn parse_expression<'a>(tokens: &'a [Token]) -> Result<Expr<'a>, ParseError> {
+pub fn parse_query<'a>(tokens: &'a [Token]) -> Result<Query<'a>, ParseError> {
+    let mut filters = Vec::with_capacity(3);
+    let mut tokens_slice = tokens;
+
+    while let (Some(filter), tokens) = parse_filter(tokens_slice)? {
+        filters.push(filter);
+
+        // OR operator found? There might be the other filter coming next.
+        if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::Or)) {
+            tokens_slice = tokens;
+        } else {
+            tokens_slice = tokens;
+            break;
+        }
+    }
+
+    let (range, _) = parse_range(tokens_slice)?;
+    Ok(Query { filters, range })
+}
+
+pub fn parse_filter<'a>(
+    tokens: &'a [Token],
+) -> Result<(Option<Filter<'a>>, &'a [Token<'a>]), ParseError> {
     if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::CurlyOpen)) {
-        let (filters, tokens) = parse_filters(tokens)?;
+        let (conds, tokens) = parse_conds(tokens)?;
 
         // curly closing brace = end of filters
         if let Some((_, tokens)) = match_token(tokens, Matcher::Exact(Term::CurlyClose)) {
-            let (range, _) = parse_range(tokens)?;
-            return Ok(Expr { filters, range });
+            return Ok((Some(Filter { conds }), tokens));
         }
         // something's wrong with filter definition (like invalid path)
         return Err(ParseError::MalformedFilter(ErrorOffset(tokens[0].2)));
     }
-    // entire expression starts with wrong token
-    Err(ParseError::MalformedExpression)
+    // entire filter starts with wrong token
+    Err(ParseError::MalformedQuery)
 }
 
-fn parse_filters<'a>(
-    tokens: &'a [Token],
-) -> Result<(Vec<Filter<'a>>, &'a [Token<'a>]), ParseError> {
-    let mut filters = Vec::<Filter>::new();
+fn parse_conds<'a>(tokens: &'a [Token]) -> Result<(Vec<Cond<'a>>, &'a [Token<'a>]), ParseError> {
+    let mut conds = Vec::<Cond>::new();
     let mut tokens_slice = tokens;
 
     while let Some((Token(Term::Path(id), _, _), tokens)) = match_token(tokens_slice, Matcher::Path)
@@ -262,21 +286,21 @@ fn parse_filters<'a>(
         let (value, tokens) = parse_value(tokens)?;
 
         tokens_slice = tokens;
-        filters.push(Filter {
+        conds.push(Cond {
             path: id.to_owned().split('.').collect::<Vec<_>>(),
             op: Operator::try_from(op)?,
             op_negative: negative,
             value,
         });
 
-        // Comma found? There might be the other filters coming next.
+        // Comma found? There might be the other condition coming next.
         if let Some((_, tokens)) = match_token(tokens_slice, Matcher::Exact(Term::Comma)) {
             tokens_slice = tokens;
         } else {
             break;
         }
     }
-    Ok((filters, tokens_slice))
+    Ok((conds, tokens_slice))
 }
 
 fn parse_value<'a>(tokens: &'a [Token]) -> Result<(Value, &'a [Token<'a>]), ParseError> {
@@ -336,32 +360,37 @@ fn parse_range<'a>(tokens: &'a [Token]) -> Result<(Option<Range>, &'a [Token<'a>
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::lexer::tokenize;
 
-    use super::*;
-
     #[test]
-    fn invalid_expression() {
-        let tokens = tokenize("[ meta.tag != \"boo\"]").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+    fn invalid_query() {
+        let tokens = tokenize("< meta.tag != \"boo\">").unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(expr, ParseError::MalformedExpression);
+        assert_eq!(query, ParseError::MalformedQuery);
     }
 
     #[test]
-    fn empty_expression() {
-        let tokens = tokenize("{}").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap();
-
-        assert_eq!(expr.filters.len(), 0);
-    }
-
-    #[test]
-    fn empty_input() {
+    fn empty_query() {
         let tokens = tokenize("").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(expr, ParseError::MalformedExpression);
+        assert_eq!(query, ParseError::MalformedQuery);
+    }
+
+    #[test]
+    fn empty_filter() {
+        let tokens = tokenize("{}").unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap();
+
+        assert_eq!(
+            query,
+            Query {
+                filters: vec![Filter { conds: vec![] }],
+                range: None
+            }
+        );
     }
 
     #[test]
@@ -379,56 +408,44 @@ mod tests {
     }
 
     #[test]
-    fn parse_filter_simple() {
+    fn parse_cond_simple() {
         let tokens = tokenize("{ meta.focal_length=2.3 }").unwrap();
-        let expr = parse_expression(tokens.as_slice());
+        let query = parse_query(tokens.as_slice()).unwrap();
+        let filter = query.filters.first().unwrap();
+        assert_eq!(filter.conds.len(), 1);
 
-        assert!(expr.is_ok());
-
-        let filters = expr.unwrap().filters;
-        assert_eq!(filters.len(), 1);
-
-        let filter = filters.first().unwrap();
-        assert_eq!(filter.path, vec!["meta", "focal_length"]);
-        assert_eq!(filter.op, Operator::Equal);
-        assert_eq!(filter.value, Value::from(Scalar::Float(2.3)));
-        assert!(!filter.op_negative);
+        let cond = filter.conds.first().unwrap();
+        assert_eq!(cond.path, vec!["meta", "focal_length"]);
+        assert_eq!(cond.op, Operator::Equal);
+        assert_eq!(cond.value, Value::from(Scalar::Float(2.3)));
+        assert!(!cond.op_negative);
     }
 
     #[test]
-    fn parse_filter_negated() {
+    fn parse_cond_negated() {
         let tokens = tokenize("{ meta.tag !~ \"favourite\" }").unwrap();
-        let expr = parse_expression(tokens.as_slice());
+        let query = parse_query(tokens.as_slice()).unwrap();
+        let filter = query.filters.first().unwrap();
+        assert_eq!(filter.conds.len(), 1);
 
-        assert!(expr.is_ok());
-
-        let filters = expr.unwrap().filters;
-        assert_eq!(filters.len(), 1);
-
-        let filter = filters.first().unwrap();
-        assert_eq!(filter.path, vec!["meta", "tag"]);
-        assert_eq!(filter.op, Operator::Contains);
+        let cond = filter.conds.first().unwrap();
+        assert_eq!(cond.path, vec!["meta", "tag"]);
+        assert_eq!(cond.op, Operator::Contains);
         assert_eq!(
-            filter.value,
+            cond.value,
             Value::from(Scalar::String("favourite".to_string()))
         );
-        assert!(filter.op_negative);
+        assert!(cond.op_negative);
     }
 
     #[test]
-    fn multiple_filters() {
+    fn multiple_conds() {
         let tokens = tokenize("{ meta.tag != \"favourite\", meta.focal.length=3 }").unwrap();
-        let mut expr = parse_expression(tokens.as_slice()).unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap();
+        let filter = query.filters.first().unwrap();
+        assert_eq!(filter.conds.len(), 2);
 
-        assert_eq!(expr.filters.len(), 2);
-
-        let second = expr.filters.pop().unwrap();
-        assert_eq!(second.path, vec!["meta", "focal", "length"]);
-        assert_eq!(second.value, Value::from(Scalar::Integer(3)));
-        assert_eq!(second.op, Operator::Equal);
-        assert!(!second.op_negative);
-
-        let first = expr.filters.pop().unwrap();
+        let first = &filter.conds[0];
         assert_eq!(first.path, vec!["meta", "tag"]);
         assert_eq!(
             first.value,
@@ -436,47 +453,82 @@ mod tests {
         );
         assert_eq!(first.op, Operator::Equal);
         assert!(first.op_negative);
+
+        let second = &filter.conds[1];
+        assert_eq!(second.path, vec!["meta", "focal", "length"]);
+        assert_eq!(second.value, Value::from(Scalar::Integer(3)));
+        assert_eq!(second.op, Operator::Equal);
+        assert!(!second.op_negative);
     }
 
     #[test]
-    fn multiple_filters_invalid_separator() {
+    fn multiple_filters() {
+        let tokens = tokenize("{ tag != \"favourite\" } | { focal_length=3.2 }").unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap();
+        let filters = query.filters;
+
+        assert_eq!(filters.len(), 2);
+
+        let filter_1 = &filters[0];
+        let cond_1 = &filter_1.conds[0];
+        assert_eq!(cond_1.path[0], "tag");
+        assert_eq!(cond_1.value, Value::from(Scalar::String("favourite".to_string())));
+
+        let filter_2 = &filters[1];
+        let cond_2 = &filter_2.conds[0];
+        assert_eq!(cond_2.path[0], "focal_length");
+        assert_eq!(cond_2.value, Value::from(Scalar::Float(3.2)));
+    }
+
+    #[test]
+    fn multiple_filters_with_wrong_operator() {
+        let tokens = tokenize("{ tag != \"favourite\" } & { focal_length=3.2 }").unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap();
+
+        assert_eq!(query.filters.len(), 1);
+    }
+
+    #[test]
+    fn multiple_conds_with_invalid_separator() {
         let tokens = tokenize("{ meta.tag != \"favourite\"; meta.focal_length=3.2 }").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
-        assert_eq!(expr, ParseError::MalformedFilter(ErrorOffset(25)));
+        let query = parse_query(tokens.as_slice()).unwrap_err();
+        assert_eq!(query, ParseError::MalformedFilter(ErrorOffset(25)));
     }
 
     #[test]
-    fn filter_invalid_operator() {
+    fn filter_with_invalid_operator() {
         let tokens = tokenize("{ meta.tag !+ \"wrong\" }").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(expr, ParseError::InvalidFilterOperator(ErrorOffset(12)));
+        assert_eq!(query, ParseError::InvalidFilterOperator(ErrorOffset(12)));
     }
 
     #[test]
-    fn filter_invalid_value() {
+    fn filter_with_invalid_value() {
         let tokens = tokenize("{ meta.tag != invalid }").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(expr, ParseError::InvalidScalarValue(ErrorOffset(14)));
+        assert_eq!(query, ParseError::InvalidScalarValue(ErrorOffset(14)));
     }
 
     #[test]
-    fn filter_negative_value() {
+    fn filter_with_negative_value() {
         let tokens = tokenize("{ meta.tag = -1 }").unwrap();
-        let mut expr = parse_expression(tokens.as_slice()).unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap();
+        let filter = query.filters.first().unwrap();
+        let first = filter.conds.first().unwrap();
 
-        let first = expr.filters.pop().unwrap();
         assert_eq!(first.path, vec!["meta", "tag"]);
         assert_eq!(first.value, Value::from(Scalar::Integer(-1)));
     }
 
     #[test]
-    fn filter_array_value() {
+    fn filter_with_array_value() {
         let tokens = tokenize("{ meta.tag = [1,2,3] }").unwrap();
-        let mut expr = parse_expression(tokens.as_slice()).unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap();
+        let filter = query.filters.first().unwrap();
+        let first = filter.conds.first().unwrap();
 
-        let first = expr.filters.pop().unwrap();
         assert_eq!(first.path, vec!["meta", "tag"]);
         assert_eq!(
             first.value,
@@ -485,53 +537,54 @@ mod tests {
     }
 
     #[test]
-    fn filter_empty_array_value() {
+    fn filter_with_empty_array_value() {
         let tokens = tokenize("{ meta.tag = [] }").unwrap();
-        let mut expr = parse_expression(tokens.as_slice()).unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap();
+        let filter = query.filters.first().unwrap();
+        let first = filter.conds.first().unwrap();
 
-        let first = expr.filters.pop().unwrap();
         assert_eq!(first.path, vec!["meta", "tag"]);
         assert_eq!(first.value, Value::from(vec![]));
     }
 
     #[test]
-    fn filter_array_missing_separator() {
+    fn filter_with_array_missing_separator() {
         let tokens = tokenize("{ meta.tag = [1 2] }").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(expr, ParseError::InvalidArrayValue(ErrorOffset(16)));
+        assert_eq!(query, ParseError::InvalidArrayValue(ErrorOffset(16)));
     }
 
     #[test]
-    fn filter_array_invalid_value() {
+    fn filter_with_array_invalid_value() {
         let tokens = tokenize("{ meta.tag = [1, invalid] }").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(expr, ParseError::InvalidArrayValue(ErrorOffset(17)));
+        assert_eq!(query, ParseError::InvalidArrayValue(ErrorOffset(17)));
     }
 
     #[test]
-    fn filter_missing_value() {
+    fn filter_with_missing_value() {
         let tokens = tokenize("{ meta.tag= }").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(expr, ParseError::InvalidScalarValue(ErrorOffset(12)));
+        assert_eq!(query, ParseError::InvalidScalarValue(ErrorOffset(12)));
     }
 
     #[test]
-    fn filter_invalid_value_other() {
+    fn filter_with_invalid_value_other() {
         let tokens = tokenize("{ meta.tag != \"boo\", meta.focal=invalid}").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(expr, ParseError::InvalidScalarValue(ErrorOffset(32)));
+        assert_eq!(query, ParseError::InvalidScalarValue(ErrorOffset(32)));
     }
 
     #[test]
-    fn filter_invalid_path_other() {
+    fn filter_with_invalid_path_other() {
         let tokens = tokenize("{ meta.tag != \"boo\", +=true}").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap_err();
+        let query = parse_query(tokens.as_slice()).unwrap_err();
 
-        assert_eq!(expr, ParseError::MalformedFilter(ErrorOffset(21)));
+        assert_eq!(query, ParseError::MalformedFilter(ErrorOffset(21)));
     }
 
     #[test]
@@ -579,10 +632,10 @@ mod tests {
     }
 
     #[test]
-    fn range_with_filters() {
+    fn range_with_filter() {
         let tokens = tokenize("{meta.tag=\"favourite\"}[10w]").unwrap();
-        let expr = parse_expression(tokens.as_slice()).unwrap();
+        let query = parse_query(tokens.as_slice()).unwrap();
 
-        assert_eq!(expr.range.unwrap(), Range(10, RangeUnit::Weeks));
+        assert_eq!(query.range.unwrap(), Range(10, RangeUnit::Weeks));
     }
 }
