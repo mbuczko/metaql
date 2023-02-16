@@ -57,9 +57,9 @@ pub fn transform<I: AsRef<str>>(
     let mut filters_fragments = Vec::with_capacity(3);
     let mut filters_params = Vec::with_capacity(5);
 
-    for filter in query.filters {
+    for group in query.filter.groups {
         let mut filter_fragment = String::new();
-        for cond in filter.conds {
+        for cond in group.matchers {
             let column = columns
                 .as_ref()
                 .map(|c| c.get(&Column::Filter(cond.path.first().unwrap())))
@@ -307,7 +307,7 @@ mod tests {
     #[test]
     fn multi_filter_query() {
         let q = transform(
-            "{favourite.tag = \"cats\", folder = \"pets\"} | {offset = 1, version = 2}",
+            "{favourite.tag = \"cats\", folder = \"pets\" | offset = 1, version = 2}",
             Some(columns!(Column::Filter("favourite") => "u.favourite")),
         );
         assert_eq!(
@@ -327,7 +327,7 @@ mod tests {
     #[test]
     fn multi_filter_query_with_range() {
         let q = transform(
-            "{favourite.tag ~ \"cats\"} | {meta.focal.length=18.5} [10d]",
+            "{favourite.tag ~ \"cats\" | meta.focal.length=18.5} [10d]",
             Some(columns!(
                 Column::Range => "created_at"
             )),
@@ -348,7 +348,7 @@ mod tests {
     #[test]
     fn multi_filter_query_with_empty_filter() {
         let q = transform(
-            "{favourite.tag = \"cats\", folder = \"pets\"} | {}",
+            "{favourite.tag = \"cats\", folder = \"pets\" | }",
             Some(columns!(Column::Filter("favourite") => "u.favourite")),
         );
         assert_eq!(
