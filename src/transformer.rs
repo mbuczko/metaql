@@ -46,6 +46,12 @@ impl Statement {
     }
 }
 
+impl Default for Statement {
+    fn default() -> Self {
+        Self { query: Default::default(), params: vec![] }
+    }
+}
+
 pub fn transform<I: AsRef<str>>(
     input: I,
     columns: Option<Columns>,
