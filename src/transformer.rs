@@ -20,7 +20,7 @@ pub enum Column<'a> {
 type Alias = &'static str;
 type Columns<'a> = HashMap<Column<'a>, Alias>;
 
-#[allow(unused_macros)]
+#[macro_export]
 macro_rules! columns {
     ($( $key: expr => $val: expr ),*) => {{
          let mut map = ::std::collections::HashMap::new();
