@@ -2,7 +2,7 @@ use std::fmt::Display;
 use thiserror::Error;
 
 #[derive(Debug, PartialEq)]
-pub enum Terminal<'a> {
+pub enum Term<'a> {
     RoundOpen,
     RoundClose,
     CurlyOpen,
@@ -11,6 +11,7 @@ pub enum Terminal<'a> {
     SquareClose,
     Colon,
     Comma,
+    Or,
     Equal,
     Exclamation,
     Contains,
@@ -40,7 +41,7 @@ impl Display for Brace {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Token<'a>(pub Terminal<'a>, pub usize, pub usize);
+pub struct Token<'a>(pub Term<'a>, pub usize, pub usize);
 
 #[derive(Error, Debug, PartialEq)]
 pub enum TokenizeError {
@@ -77,9 +78,9 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                     let string = &input[pos..eoi + 1];
                     let boolean = string == "true" || string == "false";
                     break if boolean {
-                        Token(Terminal::Bool(string.parse().unwrap()), pos, eoi)
+                        Token(Term::Bool(string.parse().unwrap()), pos, eoi)
                     } else {
-                        Token(Terminal::Path(string), pos, eoi)
+                        Token(Term::Path(string), pos, eoi)
                     };
                 }
             }
@@ -94,17 +95,15 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                             continue;
                         }
                         // a float number, maybe?
-                        if *ch == '.' {
-                            if !point {
-                                chars.next();
-                                point = true;
-                                continue;
-                            }
+                        if *ch == '.' && !point {
+                            chars.next();
+                            point = true;
+                            continue;
                         }
                     }
                     break if point {
                         Token(
-                            Terminal::Float(
+                            Term::Float(
                                 input[pos..eoi + 1]
                                     .parse()
                                     .map_err(|_| TokenizeError::MalformedNumeric(eoi))?,
@@ -114,7 +113,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                         )
                     } else {
                         Token(
-                            Terminal::Integer(
+                            Term::Integer(
                                 input[pos..eoi + 1]
                                     .parse()
                                     .map_err(|_| TokenizeError::MalformedNumeric(eoi))?,
@@ -128,7 +127,7 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             '"' => loop {
                 if let Some((p, ch)) = chars.next() {
                     if ch == '"' {
-                        break Token(Terminal::String(&input[pos + 1..p]), pos, p);
+                        break Token(Term::String(&input[pos + 1..p]), pos, p);
                     }
                 } else {
                     return Err(TokenizeError::InvalidString(pos));
@@ -136,10 +135,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             },
             '(' => {
                 braces.push(Brace::Round);
-                Token(Terminal::RoundOpen, pos, pos)
+                Token(Term::RoundOpen, pos, pos)
             }
             ')' => match braces.pop() {
-                Some(Brace::Round) => Token(Terminal::RoundClose, pos, pos),
+                Some(Brace::Round) => Token(Term::RoundClose, pos, pos),
                 b => {
                     return Err(TokenizeError::UnbalancedBraces(
                         pos,
@@ -149,10 +148,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             },
             '{' => {
                 braces.push(Brace::Curly);
-                Token(Terminal::CurlyOpen, pos, pos)
+                Token(Term::CurlyOpen, pos, pos)
             }
             '}' => match braces.pop() {
-                Some(Brace::Curly) => Token(Terminal::CurlyClose, pos, pos),
+                Some(Brace::Curly) => Token(Term::CurlyClose, pos, pos),
                 b => {
                     return Err(TokenizeError::UnbalancedBraces(
                         pos,
@@ -162,10 +161,10 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
             },
             '[' => {
                 braces.push(Brace::Square);
-                Token(Terminal::SquareOpen, pos, pos)
+                Token(Term::SquareOpen, pos, pos)
             }
             ']' => match braces.pop() {
-                Some(Brace::Square) => Token(Terminal::SquareClose, pos, pos),
+                Some(Brace::Square) => Token(Term::SquareClose, pos, pos),
                 b => {
                     return Err(TokenizeError::UnbalancedBraces(
                         pos,
@@ -173,12 +172,13 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, TokenizeError> {
                     ))
                 }
             },
-            '!' => Token(Terminal::Exclamation, pos, pos),
-            ':' => Token(Terminal::Colon, pos, pos),
-            ',' => Token(Terminal::Comma, pos, pos),
-            '=' => Token(Terminal::Equal, pos, pos),
-            '~' => Token(Terminal::Contains, pos, pos),
-            _ => Token(Terminal::Unknown, pos, pos),
+            '|' => Token(Term::Or, pos, pos),
+            '!' => Token(Term::Exclamation, pos, pos),
+            ':' => Token(Term::Colon, pos, pos),
+            ',' => Token(Term::Comma, pos, pos),
+            '=' => Token(Term::Equal, pos, pos),
+            '~' => Token(Term::Contains, pos, pos),
+            _ => Token(Term::Unknown, pos, pos),
         };
         output.push(token);
     }
@@ -195,10 +195,10 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                Token(Terminal::CurlyOpen, 0, 0),
-                Token(Terminal::RoundOpen, 3, 3),
-                Token(Terminal::RoundClose, 4, 4),
-                Token(Terminal::CurlyClose, 6, 6)
+                Token(Term::CurlyOpen, 0, 0),
+                Token(Term::RoundOpen, 3, 3),
+                Token(Term::RoundClose, 4, 4),
+                Token(Term::CurlyClose, 7, 7)
             ]
         );
     }
@@ -209,9 +209,9 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                Token(Terminal::CurlyOpen, 0, 0),
-                Token(Terminal::String("lorem ipsum"), 2, 14),
-                Token(Terminal::CurlyClose, 16, 16)
+                Token(Term::CurlyOpen, 0, 0),
+                Token(Term::String("lorem ipsum"), 2, 14),
+                Token(Term::CurlyClose, 16, 16)
             ]
         );
     }
@@ -240,78 +240,82 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                Token(Terminal::CurlyOpen, 0, 0),
-                Token(Terminal::Path("mime-type"), 1, 9),
-                Token(Terminal::Colon, 10, 10),
-                Token(Terminal::String("image/png"), 11, 21),
-                Token(Terminal::CurlyClose, 22, 22)
+                Token(Term::CurlyOpen, 0, 0),
+                Token(Term::Path("mime-type"), 1, 9),
+                Token(Term::Colon, 10, 10),
+                Token(Term::String("image/png"), 11, 21),
+                Token(Term::CurlyClose, 22, 22)
             ]
         );
     }
+
     #[test]
     fn integer() {
         let result = tokenize("{focal-length: 32}").unwrap();
         assert_eq!(
             result,
             vec![
-                Token(Terminal::CurlyOpen, 0, 0),
-                Token(Terminal::Path("focal-length"), 1, 12),
-                Token(Terminal::Colon, 13, 13),
-                Token(Terminal::Integer(32), 15, 16),
-                Token(Terminal::CurlyClose, 17, 17)
+                Token(Term::CurlyOpen, 0, 0),
+                Token(Term::Path("focal-length"), 1, 12),
+                Token(Term::Colon, 13, 13),
+                Token(Term::Integer(32), 15, 16),
+                Token(Term::CurlyClose, 17, 17)
             ]
         );
     }
+
     #[test]
     fn float() {
         let result = tokenize("{width: 32.122}").unwrap();
         assert_eq!(
             result,
             vec![
-                Token(Terminal::CurlyOpen, 0, 0),
-                Token(Terminal::Path("width"), 1, 5),
-                Token(Terminal::Colon, 6, 6),
-                Token(Terminal::Float(32.122), 8, 13),
-                Token(Terminal::CurlyClose, 14, 14)
+                Token(Term::CurlyOpen, 0, 0),
+                Token(Term::Path("width"), 1, 5),
+                Token(Term::Colon, 6, 6),
+                Token(Term::Float(32.122), 8, 13),
+                Token(Term::CurlyClose, 14, 14)
             ]
         );
         let result = tokenize("{width: 32.122.3}").unwrap();
         assert_eq!(
             result,
             vec![
-                Token(Terminal::CurlyOpen, 0, 0),
-                Token(Terminal::Path("width"), 1, 5),
-                Token(Terminal::Colon, 6, 6),
-                Token(Terminal::Float(32.122), 8, 13),
-                Token(Terminal::Unknown, 14, 14),
-                Token(Terminal::Integer(3), 15, 15),
-                Token(Terminal::CurlyClose, 16, 16)
+                Token(Term::CurlyOpen, 0, 0),
+                Token(Term::Path("width"), 1, 5),
+                Token(Term::Colon, 6, 6),
+                Token(Term::Float(32.122), 8, 13),
+                Token(Term::Unknown, 14, 14),
+                Token(Term::Integer(3), 15, 15),
+                Token(Term::CurlyClose, 16, 16)
             ]
         );
         let result = tokenize("{width: 32..}").unwrap();
         assert_eq!(
             result,
             vec![
-                Token(Terminal::CurlyOpen, 0, 0),
-                Token(Terminal::Path("width"), 1, 5),
-                Token(Terminal::Colon, 6, 6),
-                Token(Terminal::Float(32.0), 8, 9),
-                Token(Terminal::Unknown, 11, 11),
-                Token(Terminal::CurlyClose, 12, 12)
+                Token(Term::CurlyOpen, 0, 0),
+                Token(Term::Path("width"), 1, 5),
+                Token(Term::Colon, 6, 6),
+                Token(Term::Float(32.0), 8, 9),
+                Token(Term::Unknown, 11, 11),
+                Token(Term::CurlyClose, 12, 12)
             ]
         );
     }
+
     #[test]
     fn negative() {
         let result = tokenize("-10 -3.12").unwrap();
         assert_eq!(
             result,
             vec![
-                Token(Terminal::Integer(-10), 0, 2),
-                Token(Terminal::Float(-3.12), 4, 8)
+                Token(Term::Integer(-10), 0, 2),
+                Token(Term::Float(-3.12), 4, 8)
             ]
         )
     }
+
     #[test]
     fn invalid_negative() {
         let result = tokenize("-\"negative\"").unwrap_err();
@@ -320,15 +324,16 @@ mod tests {
         let result = tokenize("-true").unwrap_err();
         assert_eq!(result, TokenizeError::MalformedNumeric(0));
     }
+
     #[test]
     fn booleans() {
         let result = tokenize("true flase false").unwrap();
         assert_eq!(
             result,
             vec![
-                Token(Terminal::Bool(true), 0, 3),
-                Token(Terminal::Path("flase"), 5, 9),
-                Token(Terminal::Bool(false), 11, 15)
+                Token(Term::Bool(true), 0, 3),
+                Token(Term::Path("flase"), 5, 9),
+                Token(Term::Bool(false), 11, 15)
             ]
         )
     }
