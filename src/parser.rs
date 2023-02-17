@@ -281,13 +281,12 @@ pub fn parse_filter<'a>(
                 }
             }
         }
-        // curly closing brace = end of groups
-        return if let Some((_, tokens)) =
-            match_token(tokens_slice, TokenMatcher::Exact(Term::CurlyClose))
-        {
+        // closing curly bracket = end of groups
+        let eog = match_token(tokens_slice, TokenMatcher::Exact(Term::CurlyClose));
+        return if let Some((_, tokens)) = eog {
             Ok((Some(Filter { groups }), tokens))
         } else {
-            Err(ParseError::MalformedFilter(ErrorOffset(tokens_slice[0].2)))
+            Err(ParseError::MalformedFilter(ErrorOffset(tokens_slice[0].1)))
         };
     }
     Err(ParseError::MalformedFilter(ErrorOffset(
@@ -301,7 +300,8 @@ fn parse_group<'a>(
     let mut matchers = Vec::<Matcher>::new();
     let mut tokens_slice = tokens;
 
-    while let Some((Token(Term::Path(id), _, _), tokens)) = match_token(tokens_slice, TokenMatcher::Path)
+    while let Some((Token(Term::Path(id), _, _), tokens)) =
+        match_token(tokens_slice, TokenMatcher::Path)
     {
         let negative = match_token(tokens, TokenMatcher::Negation).is_some();
         let tokens = if negative { &tokens[1..] } else { tokens };
