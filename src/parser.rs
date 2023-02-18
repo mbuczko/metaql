@@ -119,27 +119,6 @@ pub enum ParseError {
     InvalidRangeUnit,
 }
 
-impl From<Value> for i32 {
-    fn from(val: Value) -> Self {
-        1
-    }
-}
-impl From<Value> for f32 {
-    fn from(val: Value) -> Self {
-        1.0
-    }
-}
-impl From<Value> for &str {
-    fn from(val: Value) -> Self {
-        "dupa"
-    }
-}
-impl From<Value> for bool {
-    fn from(val: Value) -> Self {
-        true
-    }
-}
-
 impl<'a> TryFrom<&Token<'a>> for Operator {
     type Error = ParseError;
 
