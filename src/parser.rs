@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use thiserror::Error;
 
-use crate::lexer::{Term, Token};
+use crate::lexer::{Term, Token, TokenizeError};
 
 /// Parser rules:
 ///
@@ -98,7 +98,9 @@ pub struct ErrorOffset(usize);
 #[derive(Error, Debug, PartialEq)]
 pub enum ParseError {
     #[error("malformed query")]
-    MalformedQuery,
+    InvalidTokens(TokenizeError),
+    #[error("malformed query")]
+    MalformedQuery(ErrorOffset),
     #[error("malformed filter")]
     MalformedFilter(ErrorOffset),
     #[error("invalid scalar value (one of: integer, float, bool, string expected)")]
@@ -254,7 +256,7 @@ pub fn parse_query<'a>(tokens: &'a [Token]) -> Result<Query<'a>, ParseError> {
             Ok(Query { filter, range })
         };
     }
-    Err(ParseError::MalformedQuery)
+    Err(ParseError::MalformedQuery(ErrorOffset(0)))
 }
 
 pub fn parse_filter<'a>(

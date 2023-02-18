@@ -1,8 +1,8 @@
-use std::{collections::HashMap, error::Error};
+use std::collections::HashMap;
 
 use crate::{
     lexer::tokenize,
-    parser::{parse_query, Operator, Scalar, Value},
+    parser::{parse_query, Operator, ParseError, Scalar, Value},
 };
 
 #[derive(Debug, PartialEq)]
@@ -61,8 +61,8 @@ pub fn transform<I: AsRef<str>>(
     input: I,
     columns: Option<Columns>,
     start_params_index: u8,
-) -> Result<Statement, Box<dyn Error>> {
-    let tokens = tokenize(input.as_ref())?;
+) -> Result<Statement, ParseError> {
+    let tokens = tokenize(input.as_ref()).map_err(ParseError::InvalidTokens)?;
     let query = parse_query(tokens.as_slice())?;
 
     let mut range_fragment = String::new();
