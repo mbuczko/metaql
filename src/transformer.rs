@@ -30,18 +30,20 @@ macro_rules! columns {
 }
 
 impl Statement {
-    fn new(filters: String, range: String, params: Vec<Value>) -> Self {
+    fn new(filter: String, range: String, params: Vec<Value>) -> Self {
         let mut stmt = Vec::with_capacity(2);
-
-        if !filters.is_empty() {
-            stmt.push(format!("({filters})"));
+        if !filter.is_empty() {
+            stmt.push(format!("({filter})"));
         }
         if !range.is_empty() {
             stmt.push(range);
         }
-        Self {
-            query: stmt.join(" AND "),
-            params,
+
+        let query = stmt.join(" AND ");
+        if query.is_empty() {
+            Self::default()
+        } else {
+            Self { query, params }
         }
     }
 }
@@ -49,7 +51,7 @@ impl Statement {
 impl Default for Statement {
     fn default() -> Self {
         Self {
-            query: Default::default(),
+            query: "1=1".to_string(),
             params: vec![],
         }
     }
@@ -226,7 +228,7 @@ mod tests {
         assert_eq!(
             q.unwrap(),
             Statement {
-                query: "".to_string(),
+                query: "1=1".to_string(),
                 params: vec![]
             }
         );
