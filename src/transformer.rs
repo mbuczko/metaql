@@ -59,7 +59,7 @@ impl Default for Statement {
 
 pub fn transform<I: AsRef<str>>(
     input: I,
-    columns: Option<Columns>,
+    columns: Option<&Columns>,
     start_params_index: u8,
 ) -> Result<Statement, ParseError> {
     let tokens = tokenize(input.as_ref()).map_err(ParseError::InvalidTokens)?;
@@ -224,7 +224,7 @@ mod tests {
     }
     #[test]
     fn no_filter_no_range() {
-        let q = transform("{ }", Some(columns!(Column::Range => "created_at")), 1);
+        let q = transform("{ }", Some(&columns!(Column::Range => "created_at")), 1);
         assert_eq!(
             q.unwrap(),
             Statement {
@@ -238,7 +238,7 @@ mod tests {
     fn no_filter_with_range() {
         let q = transform(
             "{ }[10ms]",
-            Some(columns!(Column::Range => "created_at")),
+            Some(&columns!(Column::Range => "created_at")),
             1,
         );
         assert_eq!(
@@ -321,7 +321,7 @@ mod tests {
     fn aliased_filter_query() {
         let q = transform(
             "{favourite.tag = \"cats\"}",
-            Some(columns!(Column::Filter("favourite") => "u.favourite")),
+            Some(&columns!(Column::Filter("favourite") => "u.favourite")),
             1,
         );
         assert_eq!(
@@ -337,7 +337,7 @@ mod tests {
     fn multi_filter_query() {
         let q = transform(
             "{favourite.tag = \"cats\", folder = \"pets\" | offset = 1, version = 2}",
-            Some(columns!(Column::Filter("favourite") => "u.favourite")),
+            Some(&columns!(Column::Filter("favourite") => "u.favourite")),
             1,
         );
         assert_eq!(
@@ -359,7 +359,7 @@ mod tests {
     fn multi_filter_query_with_range() {
         let q = transform(
             "{favourite.tag ~ \"cats\" | meta.focal.length=18.5} [10d]",
-            Some(columns!(
+            Some(&columns!(
                 Column::Range => "created_at"
             )),
             1,
@@ -381,7 +381,7 @@ mod tests {
     fn multi_filter_query_with_empty_filter() {
         let q = transform(
             "{favourite.tag = \"cats\", folder = \"pets\" | }",
-            Some(columns!(Column::Filter("favourite") => "u.favourite")),
+            Some(&columns!(Column::Filter("favourite") => "u.favourite")),
             1,
         );
         assert_eq!(
@@ -450,7 +450,7 @@ mod tests {
             Column::Range => "created_at",
             Column::Filter("favourite") => "u.favourite"
         );
-        let q = transform("{favourite.tag = \"cats\"}[10d]", Some(columns), 1);
+        let q = transform("{favourite.tag = \"cats\"}[10d]", Some(&columns), 1);
         assert_eq!(
             q.unwrap(),
             Statement {
@@ -473,7 +473,7 @@ mod tests {
     fn range_query_without_range_column() {
         let q = transform(
             "{favourite.tag = \"cats\"}[10d]",
-            Some(columns!(Column::Filter("favourite") => "u.favourite")),
+            Some(&columns!(Column::Filter("favourite") => "u.favourite")),
             1,
         );
         assert!(q.is_ok());
