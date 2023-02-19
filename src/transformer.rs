@@ -17,8 +17,8 @@ pub enum Column<'a> {
     Range,
 }
 
-type Alias = &'static str;
-type Columns<'a> = HashMap<Column<'a>, Alias>;
+pub type Alias = &'static str;
+pub type Columns<'a> = HashMap<Column<'a>, Alias>;
 
 #[macro_export]
 macro_rules! columns {
