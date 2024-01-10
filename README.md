@@ -1,5 +1,3 @@
-[![Build Status](https://drone.rodzinks.pl/api/badges/michal/metaql/status.svg?ref=refs/heads/develop)](https://drone.rodzinks.pl/michal/metaql)
-
 This crate is to parse a simple query language, similar to one used by [Prometheus](https://prometheus.io/docs/prometheus/latest/querying/basics/).
 
 Grammar considered here comes down to:
