@@ -34,8 +34,8 @@ or more complicated, like:
 ```
 
 
-Futhermore, AST can be auto-transformed into corresponding WHERE conditions of SQl query.
+Futhermore, AST can be auto-transformed into corresponding WHERE conditions of SQL query.
 
-Note, conditions are very specific for Postgres as for now. For example, nested paths like `meta.focal_length` are assumed to be a valid paths within JSON objects, and as such are turned into postgres-specific JSON queries (`meta->>'focal_length` in this case).
+Note, conditions are tightly coupled with Postgres notation for now. For example, nested paths like `meta.focal_length` are assumed to be a valid paths within JSON objects, and as such are turned into postgres-specific JSON queries (`meta->>'focal_length` in this case).
 
 WIP.
